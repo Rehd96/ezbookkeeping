@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 TYPE=""
-NO_LINT="0"
+NO_LINT="${NO_LINT:-"0"}"
 NO_TEST="0"
 SKIP_TESTS="${SKIP_TESTS}"
 RELEASE=${RELEASE_BUILD:-"0"}
