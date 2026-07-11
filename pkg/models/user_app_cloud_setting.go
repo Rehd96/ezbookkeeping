@@ -24,6 +24,8 @@ var ALL_ALLOWED_CLOUD_SYNC_APP_SETTING_KEY_TYPES = map[string]UserApplicationClo
 	"timezoneUsedForStatisticsInHomePage":         USER_APPLICATION_CLOUD_SETTING_TYPE_NUMBER,
 	"overviewAccountFilterInHomePage":             USER_APPLICATION_CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
 	"overviewTransactionCategoryFilterInHomePage": USER_APPLICATION_CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
+	"monthlyVariableBudgetInHomePage":             USER_APPLICATION_CLOUD_SETTING_TYPE_NUMBER,
+	"fixedTransactionCategoryFilterInHomePage":    USER_APPLICATION_CLOUD_SETTING_TYPE_STRING_BOOLEAN_MAP,
 	// Transaction List Page
 	"itemsCountInTransactionListPage":      USER_APPLICATION_CLOUD_SETTING_TYPE_NUMBER,
 	"showTotalAmountInTransactionListPage": USER_APPLICATION_CLOUD_SETTING_TYPE_BOOLEAN,

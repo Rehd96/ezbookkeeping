@@ -7,7 +7,7 @@ import { useAccountsStore } from './account.ts';
 import { useTransactionCategoriesStore } from './transactionCategory.ts';
 import { useExchangeRatesStore } from './exchangeRates.ts';
 
-import { type WritableStartEndTime, DateRange } from '@/core/datetime.ts';
+import { type StartEndTime, type WritableStartEndTime, DateRange } from '@/core/datetime.ts';
 import { TimezoneTypeForStatistics } from '@/core/timezone.ts';
 import type { TransactionType } from '@/core/transaction.ts';
 
@@ -15,7 +15,10 @@ import type {
     TransactionAmountsRequestType,
     TransactionAmountsRequestParams,
     TransactionAmountsResponse,
-    TransactionOverviewResponse
+    TransactionAmountsResponseItem,
+    TransactionOverviewResponse,
+    TransactionOverviewResponseItem,
+    TransactionStatisticResponse
 } from '@/models/transaction.ts';
 import { ALL_TRANSACTION_AMOUNTS_REQUEST_TYPE } from '@/models/transaction.ts';
 
@@ -125,6 +128,13 @@ export const useOverviewStore = defineStore('overview', () => {
     const transactionOverviewData = ref<TransactionAmountsResponse>({});
     const transactionOverviewStateInvalid = ref<boolean>(true);
 
+    const variableExpenseData = ref<TransactionAmountsResponseItem | null>(null);
+    const variableExpenseStateInvalid = ref<boolean>(true);
+
+    const weeklyExpenseData = ref<TransactionStatisticResponse[] | null>(null);
+    const weeklyExpenseRanges = ref<StartEndTime[]>([]);
+    const weeklyExpenseStateInvalid = ref<boolean>(true);
+
     const transactionOverview = computed<TransactionOverviewResponse>(() => {
         const overviewData = transactionOverviewData.value;
 
@@ -192,6 +202,59 @@ export const useOverviewStore = defineStore('overview', () => {
         return finalOverviewData;
     });
 
+    const variableExpenseThisMonth = computed<TransactionOverviewResponseItem>(() => {
+        const item = variableExpenseData.value;
+
+        if (!item) {
+            return {
+                valid: false,
+                incomeAmount: 0,
+                expenseAmount: 0,
+                incompleteIncomeAmount: false,
+                incompleteExpenseAmount: false
+            };
+        }
+
+        const defaultCurrency = userStore.currentUserDefaultCurrency;
+        let totalIncomeAmount = 0;
+        let totalExpenseAmount = 0;
+        let hasUnCalculatedTotalIncome = false;
+        let hasUnCalculatedTotalExpense = false;
+
+        if (item.amounts) {
+            for (const amount of item.amounts) {
+                if (amount.currency !== defaultCurrency) {
+                    const incomeAmount = exchangeRatesStore.getExchangedAmount(amount.incomeAmount, amount.currency, defaultCurrency);
+                    const expenseAmount = exchangeRatesStore.getExchangedAmount(amount.expenseAmount, amount.currency, defaultCurrency);
+
+                    if (isNumber(incomeAmount)) {
+                        totalIncomeAmount += Math.trunc(incomeAmount);
+                    } else {
+                        hasUnCalculatedTotalIncome = true;
+                    }
+
+                    if (isNumber(expenseAmount)) {
+                        totalExpenseAmount += Math.trunc(expenseAmount);
+                    } else {
+                        hasUnCalculatedTotalExpense = true;
+                    }
+                } else {
+                    totalIncomeAmount += amount.incomeAmount;
+                    totalExpenseAmount += amount.expenseAmount;
+                }
+            }
+        }
+
+        return {
+            valid: true,
+            incomeAmount: totalIncomeAmount,
+            expenseAmount: totalExpenseAmount,
+            incompleteIncomeAmount: hasUnCalculatedTotalIncome,
+            incompleteExpenseAmount: hasUnCalculatedTotalExpense,
+            amounts: item.amounts || []
+        };
+    });
+
     function getTransactionDateRange(): TransactionDataRange {
         const dateRange: TransactionDataRange = {
             today: { startTime: 0, endTime: 0 },
@@ -251,11 +314,24 @@ export const useOverviewStore = defineStore('overview', () => {
         transactionOverviewStateInvalid.value = invalidState;
     }
 
+    function updateVariableExpenseInvalidState(invalidState: boolean): void {
+        variableExpenseStateInvalid.value = invalidState;
+    }
+
+    function updateWeeklyExpenseInvalidState(invalidState: boolean): void {
+        weeklyExpenseStateInvalid.value = invalidState;
+    }
+
     function resetTransactionOverview(): void {
         updateTransactionDateRange();
         transactionOverviewOptions.value.loadLast11Months = false;
         transactionOverviewData.value = {};
         transactionOverviewStateInvalid.value = true;
+        variableExpenseData.value = null;
+        variableExpenseStateInvalid.value = true;
+        weeklyExpenseData.value = null;
+        weeklyExpenseRanges.value = [];
+        weeklyExpenseStateInvalid.value = true;
     }
 
     function loadTransactionOverview({ force, loadLast11Months }: { force: boolean, loadLast11Months?: boolean }): Promise<TransactionAmountsResponse> {
@@ -342,6 +418,137 @@ export const useOverviewStore = defineStore('overview', () => {
         });
     }
 
+    function loadVariableExpenseThisMonth({ force }: { force: boolean }): Promise<TransactionAmountsResponseItem | null> {
+        if (transactionDataRange.value.today.startTime !== getTodayFirstUnixTime()) {
+            updateTransactionDateRange();
+            variableExpenseStateInvalid.value = true;
+        }
+
+        if (!force && !variableExpenseStateInvalid.value) {
+            return new Promise((resolve) => {
+                resolve(variableExpenseData.value);
+            });
+        }
+
+        const requestParams: TransactionAmountsRequestParams = {
+            useTransactionTimezone: settingsStore.appSettings.timezoneUsedForStatisticsInHomePage === TimezoneTypeForStatistics.TransactionTimezone.type,
+            thisMonth: transactionDataRange.value.thisMonth
+        };
+
+        const excludeAccountIds: string[] = objectFieldWithValueToArrayItem(settingsStore.appSettings.overviewAccountFilterInHomePage, true);
+        const excludeCategoryIdsMap: Record<string, boolean> = Object.assign({},
+            settingsStore.appSettings.overviewTransactionCategoryFilterInHomePage,
+            settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage);
+        const excludeCategoryIds: string[] = objectFieldWithValueToArrayItem(excludeCategoryIdsMap, true);
+
+        return new Promise((resolve, reject) => {
+            services.getTransactionAmounts(requestParams, excludeAccountIds, excludeCategoryIds).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to retrieve transaction overview' });
+                    return;
+                }
+
+                variableExpenseData.value = data.result.thisMonth || null;
+                variableExpenseStateInvalid.value = false;
+
+                resolve(variableExpenseData.value);
+            }).catch(error => {
+                logger.error('failed to load variable expense overview', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to retrieve transaction overview' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
+    function getWeeksOfThisMonth(firstDayOfWeek: number): StartEndTime[] {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const lastDayOfWeek = (firstDayOfWeek + 6) % 7;
+        const weeks: StartEndTime[] = [];
+        let currentDay = 1;
+
+        while (currentDay <= daysInMonth) {
+            let endDay = currentDay;
+
+            while (endDay < daysInMonth && new Date(year, month, endDay).getDay() !== lastDayOfWeek) {
+                endDay++;
+            }
+
+            weeks.push({
+                startTime: Math.floor(new Date(year, month, currentDay).getTime() / 1000),
+                endTime: Math.floor(new Date(year, month, endDay, 23, 59, 59).getTime() / 1000)
+            });
+
+            currentDay = endDay + 1;
+        }
+
+        return weeks;
+    }
+
+    function loadWeeklyExpenseStatistics({ force }: { force: boolean }): Promise<TransactionStatisticResponse[] | null> {
+        const weeks = getWeeksOfThisMonth(userStore.currentUserFirstDayOfWeek);
+        const rangesChanged = weeklyExpenseRanges.value.length !== weeks.length
+            || weeklyExpenseRanges.value.length < 1
+            || weeklyExpenseRanges.value[0]?.startTime !== weeks[0]?.startTime;
+
+        if (!force && !rangesChanged && !weeklyExpenseStateInvalid.value) {
+            return new Promise((resolve) => {
+                resolve(weeklyExpenseData.value);
+            });
+        }
+
+        const useTransactionTimezone = settingsStore.appSettings.timezoneUsedForStatisticsInHomePage === TimezoneTypeForStatistics.TransactionTimezone.type;
+
+        return new Promise((resolve, reject) => {
+            Promise.all(weeks.map(week => services.getTransactionStatistics({
+                startTime: week.startTime,
+                endTime: week.endTime,
+                tagFilter: '',
+                keyword: '',
+                useTransactionTimezone: useTransactionTimezone
+            }))).then(responses => {
+                const allWeekData: TransactionStatisticResponse[] = [];
+
+                for (const response of responses) {
+                    const data = response.data;
+
+                    if (!data || !data.success || !data.result) {
+                        reject({ message: 'Unable to retrieve transaction statistics' });
+                        return;
+                    }
+
+                    allWeekData.push(data.result);
+                }
+
+                weeklyExpenseRanges.value = weeks;
+                weeklyExpenseData.value = allWeekData;
+                weeklyExpenseStateInvalid.value = false;
+
+                resolve(allWeekData);
+            }).catch(error => {
+                logger.error('failed to load weekly expense statistics', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to retrieve transaction statistics' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function getTransactionListPageParams({ type, dateType, minTime, maxTime }: { type?: TransactionType, dateType?: number, minTime?: number, maxTime?: number }): string {
         const querys: string[] = [];
 
@@ -380,12 +587,19 @@ export const useOverviewStore = defineStore('overview', () => {
         transactionOverviewOptions,
         transactionOverviewData,
         transactionOverviewStateInvalid,
+        weeklyExpenseData,
+        weeklyExpenseRanges,
         // computed states,
         transactionOverview,
+        variableExpenseThisMonth,
         // functions
         updateTransactionOverviewInvalidState,
+        updateVariableExpenseInvalidState,
+        updateWeeklyExpenseInvalidState,
         resetTransactionOverview,
         loadTransactionOverview,
+        loadVariableExpenseThisMonth,
+        loadWeeklyExpenseStatistics,
         getTransactionListPageParams
     };
 });

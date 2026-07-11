@@ -142,6 +142,33 @@
                                     @click="showTransactionCategoriesIncludedInHomePageOverviewDialog = true"
                                 />
                             </v-col>
+
+                            <v-col cols="12" md="6">
+                                <amount-input
+                                    :currency="defaultCurrency"
+                                    :show-currency="true"
+                                    :persistent-placeholder="true"
+                                    :label="tt('Monthly Variable Budget')"
+                                    :placeholder="tt('Monthly Variable Budget')"
+                                    v-model="monthlyVariableBudgetInHomePage"
+                                />
+                            </v-col>
+
+                            <v-col cols="12" md="6">
+                                <v-text-field
+                                    class="always-cursor-pointer"
+                                    item-title="displayName"
+                                    item-value="type"
+                                    persistent-placeholder
+                                    :loading="loadingTransactionCategories"
+                                    :readonly="true"
+                                    :disabled="!hasAnyTransactionCategory"
+                                    :label="tt('Transaction Categories Included in Variable Spending')"
+                                    :placeholder="tt('Transaction Categories Included in Variable Spending')"
+                                    :model-value="transactionCategoriesIncludedInVariableSpendingDisplayContent"
+                                    @click="showTransactionCategoriesIncludedInVariableSpendingDialog = true"
+                                />
+                            </v-col>
                         </v-row>
                     </v-card-text>
                 </v-form>
@@ -362,6 +389,11 @@
                                        @settings:change="showTransactionCategoriesIncludedInHomePageOverviewDialog = false" />
     </v-dialog>
 
+    <v-dialog width="800" v-model="showTransactionCategoriesIncludedInVariableSpendingDialog">
+        <category-filter-settings-card type="fixedExpenseHomePage" :dialog-mode="true" :category-types="`${CategoryType.Expense}`"
+                                       @settings:change="showTransactionCategoriesIncludedInVariableSpendingDialog = false" />
+    </v-dialog>
+
     <v-dialog width="800" v-model="showAccountsIncludedInTotalDialog">
         <account-filter-settings-card type="accountListTotalAmount" :dialog-mode="true"
                                       @settings:change="showAccountsIncludedInTotalDialog = false" />
@@ -374,6 +406,7 @@
 
 <script setup lang="ts">
 import SnackBar from '@/components/desktop/SnackBar.vue';
+import AmountInput from '@/components/desktop/AmountInput.vue';
 import AccountFilterSettingsCard from '@/views/desktop/common/cards/AccountFilterSettingsCard.vue';
 import CategoryFilterSettingsCard from '@/views/desktop/common/cards/CategoryFilterSettingsCard.vue';
 import AccountCategoryDisplayOrderDialog from '@/views/desktop/app/settings/dialogs/AccountCategoryDisplayOrderDialog.vue';
@@ -387,6 +420,7 @@ import { useAppSettingPageBase } from '@/views/base/settings/AppSettingsPageBase
 import { useSettingsStore } from '@/stores/setting.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { useUserStore } from '@/stores/user.ts';
 
 import type { LocalizedSwitchOption } from '@/core/base.ts';
 import { ThemeType } from '@/core/theme.ts';
@@ -426,18 +460,24 @@ const {
     accountsIncludedInHomePageOverviewDisplayContent,
     accountsIncludedInTotalDisplayContent,
     accountCategorysDisplayOrderContent,
-    transactionCategoriesIncludedInHomePageOverviewDisplayContent
+    transactionCategoriesIncludedInHomePageOverviewDisplayContent,
+    monthlyVariableBudgetInHomePage,
+    transactionCategoriesIncludedInVariableSpendingDisplayContent
 } = useAppSettingPageBase();
 
 const settingsStore = useSettingsStore();
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
+const userStore = useUserStore();
+
+const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
 
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 const accountCategorysDisplayOrderDialog = useTemplateRef<AccountCategoryDisplayOrderDialogType>('accountCategorysDisplayOrderDialog');
 
 const showAccountsIncludedInHomePageOverviewDialog = ref<boolean>(false);
 const showTransactionCategoriesIncludedInHomePageOverviewDialog = ref<boolean>(false);
+const showTransactionCategoriesIncludedInVariableSpendingDialog = ref<boolean>(false);
 const showAccountsIncludedInTotalDialog = ref<boolean>(false);
 
 const enableDisableOptions = computed<LocalizedSwitchOption[]>(() => getAllEnableDisableOptions());

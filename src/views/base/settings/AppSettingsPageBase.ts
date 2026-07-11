@@ -147,6 +147,16 @@ export function useAppSettingPageBase() {
         return getIncludedTransactionCategoriesDisplayContent(excludeAccountIds);
     });
 
+    const monthlyVariableBudgetInHomePage = computed<number>({
+        get: () => settingsStore.appSettings.monthlyVariableBudgetInHomePage,
+        set: (value: number) => settingsStore.setMonthlyVariableBudgetInHomePage(value)
+    });
+
+    const transactionCategoriesIncludedInVariableSpendingDisplayContent = computed<string>(() => {
+        const excludeTransactionCategoryIds = settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage;
+        return getIncludedTransactionCategoriesDisplayContent(excludeTransactionCategoryIds);
+    });
+
     function getIncludedAccountsDisplayContent(excludeAccountIds: Record<string, boolean>, allAccounts: Account[]): string {
         if (loadingAccounts.value || !allAccounts || !allAccounts.length) {
             return '';
@@ -246,6 +256,8 @@ export function useAppSettingPageBase() {
         accountsIncludedInHomePageOverviewDisplayContent,
         accountsIncludedInTotalDisplayContent,
         accountCategorysDisplayOrderContent,
-        transactionCategoriesIncludedInHomePageOverviewDisplayContent
+        transactionCategoriesIncludedInHomePageOverviewDisplayContent,
+        monthlyVariableBudgetInHomePage,
+        transactionCategoriesIncludedInVariableSpendingDisplayContent
     };
 }

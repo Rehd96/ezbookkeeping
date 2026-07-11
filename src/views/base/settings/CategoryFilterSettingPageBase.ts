@@ -21,7 +21,7 @@ import {
     isCategoryOrSubCategoriesAllChecked
 } from '@/lib/category.ts';
 
-export type CategoryFilterType = 'statisticsDefault' | 'statisticsCurrent' | 'homePageOverview' | 'transactionListCurrent' | 'custom';
+export type CategoryFilterType = 'statisticsDefault' | 'statisticsCurrent' | 'homePageOverview' | 'fixedExpenseHomePage' | 'transactionListCurrent' | 'custom';
 
 export function useCategoryFilterSettingPageBase(type?: CategoryFilterType, allowCategoryTypesStr?: string, selectedCategoryIds?: string[]) {
     const { tt } = useI18n();
@@ -127,6 +127,9 @@ export function useCategoryFilterSettingPageBase(type?: CategoryFilterType, allo
         } else if (type === 'homePageOverview') {
             filterCategoryIds.value = Object.assign(allCategoryIds, settingsStore.appSettings.overviewTransactionCategoryFilterInHomePage);
             return true;
+        } else if (type === 'fixedExpenseHomePage') {
+            filterCategoryIds.value = Object.assign(allCategoryIds, settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage);
+            return true;
         } else if (type === 'transactionListCurrent') {
             for (const categoryId of keysIfValueEquals(transactionsStore.allFilterCategoryIds, true)) {
                 const category = transactionCategoriesStore.allTransactionCategoriesMap[categoryId];
@@ -196,6 +199,10 @@ export function useCategoryFilterSettingPageBase(type?: CategoryFilterType, allo
         } else if (type === 'homePageOverview') {
             settingsStore.setOverviewTransactionCategoryFilterInHomePage(filteredCategoryIds);
             overviewStore.updateTransactionOverviewInvalidState(true);
+            overviewStore.updateVariableExpenseInvalidState(true);
+        } else if (type === 'fixedExpenseHomePage') {
+            settingsStore.setFixedTransactionCategoryFilterInHomePage(filteredCategoryIds);
+            overviewStore.updateVariableExpenseInvalidState(true);
         } else if (type === 'transactionListCurrent') {
             changed = transactionsStore.updateTransactionListFilter({
                 categoryIds: isAllSelected ? '' : finalCategoryIds

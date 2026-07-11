@@ -181,6 +181,14 @@
                                              :loading="loadingOverview" :disabled="loadingOverview"
                                              :enable-click-item="true" @click="clickMonthlyIncomeOrExpense" />
         </v-col>
+
+        <v-col cols="12" md="6" v-if="monthlyVariableBudget > 0">
+            <budget-pace-card :loading="loadingOverview" :disabled="loadingOverview" />
+        </v-col>
+
+        <v-col cols="12">
+            <weekly-spending-card :loading="loadingOverview" :disabled="loadingOverview" />
+        </v-col>
     </v-row>
 
     <snack-bar ref="snackbar" />
@@ -190,6 +198,8 @@
 import SnackBar from '@/components/desktop/SnackBar.vue';
 import IncomeExpenseOverviewCard from './overview/cards/IncomeExpenseOverviewCard.vue';
 import MonthlyIncomeAndExpenseCard, { type MonthlyIncomeAndExpenseCardClickEvent } from './overview/cards/MonthlyIncomeAndExpenseCard.vue';
+import BudgetPaceCard from './overview/cards/BudgetPaceCard.vue';
+import WeeklySpendingCard from './overview/cards/WeeklySpendingCard.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
@@ -198,6 +208,7 @@ import { useTheme } from 'vuetify';
 import { useI18n } from '@/locales/helpers.ts';
 import { useHomePageBase } from '@/views/base/HomePageBase.ts';
 
+import { useSettingsStore } from '@/stores/setting.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
@@ -244,9 +255,12 @@ const {
     getDisplayExpenseAmount
 } = useHomePageBase();
 
+const settingsStore = useSettingsStore();
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
 const overviewStore = useOverviewStore();
+
+const monthlyVariableBudget = computed<number>(() => settingsStore.appSettings.monthlyVariableBudgetInHomePage);
 
 const snackbar = useTemplateRef<SnackBarType>('snackbar');
 
@@ -300,11 +314,17 @@ const monthlyIncomeAndExpenseData = computed<TransactionMonthlyIncomeAndExpenseD
 function reload(force: boolean): void {
     loadingOverview.value = true;
 
-    const promises = [
+    const promises: Promise<unknown>[] = [
         accountsStore.loadAllAccounts({ force: false }),
         transactionCategoriesStore.loadAllCategories({ force: false }),
         overviewStore.loadTransactionOverview({ force: force, loadLast11Months: true })
     ];
+
+    if (monthlyVariableBudget.value > 0) {
+        promises.push(overviewStore.loadVariableExpenseThisMonth({ force: force }));
+    }
+
+    promises.push(overviewStore.loadWeeklyExpenseStatistics({ force: force }));
 
     Promise.all(promises).then(() => {
         loadingOverview.value = false;
