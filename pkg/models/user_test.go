@@ -108,7 +108,7 @@ func TestUserCanEditTransactionByTransactionTime_ScopeIsThisYearOrLater(t *testi
 
 	now := time.Now()
 	timezone := time.FixedZone("Timezone", int(utils.GetServerTimezoneOffsetMinutes())*60)
-	thisYearFirstDatetime := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.Local)
+	thisYearFirstDatetime := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, timezone)
 	lastYearLastDatetime := thisYearFirstDatetime.Add(-1 * time.Second)
 	thisYearLastDatetime := lastYearLastDatetime.Add(24 * time.Hour)
 
