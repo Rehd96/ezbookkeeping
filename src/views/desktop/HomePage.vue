@@ -186,6 +186,10 @@
             <budget-pace-card :loading="loadingOverview" :disabled="loadingOverview" />
         </v-col>
 
+        <v-col cols="12" md="6" v-if="monthlyVariableBudget > 0">
+            <weekly-budget-pace-card :loading="loadingOverview" :disabled="loadingOverview" />
+        </v-col>
+
         <v-col cols="12">
             <weekly-spending-card :loading="loadingOverview" :disabled="loadingOverview" />
         </v-col>
@@ -199,6 +203,7 @@ import SnackBar from '@/components/desktop/SnackBar.vue';
 import IncomeExpenseOverviewCard from './overview/cards/IncomeExpenseOverviewCard.vue';
 import MonthlyIncomeAndExpenseCard, { type MonthlyIncomeAndExpenseCardClickEvent } from './overview/cards/MonthlyIncomeAndExpenseCard.vue';
 import BudgetPaceCard from './overview/cards/BudgetPaceCard.vue';
+import WeeklyBudgetPaceCard from './overview/cards/WeeklyBudgetPaceCard.vue';
 import WeeklySpendingCard from './overview/cards/WeeklySpendingCard.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
@@ -322,6 +327,7 @@ function reload(force: boolean): void {
 
     if (monthlyVariableBudget.value > 0) {
         promises.push(overviewStore.loadVariableExpenseThisMonth({ force: force }));
+        promises.push(overviewStore.loadVariableExpenseThisWeek({ force: force }));
     }
 
     promises.push(overviewStore.loadWeeklyExpenseStatistics({ force: force }));

@@ -70,6 +70,33 @@
             </f7-list-item>
         </f7-list>
 
+        <f7-block-title>{{ tt('Variable Spending Budget') }}</f7-block-title>
+        <f7-list strong inset dividers class="settings-list">
+            <f7-list-input
+                type="number"
+                min="0"
+                :label="tt('Monthly Variable Budget')"
+                :placeholder="tt('Monthly Variable Budget')"
+                :value="monthlyVariableBudgetValue"
+                @input="onMonthlyBudgetInput"
+                clear-button
+            ></f7-list-input>
+            <f7-list-item
+                class="item-truncate-after-text"
+                :disabled="!hasAnyTransactionCategory"
+                :link="`/settings/filter/category?type=fixedExpenseHomePage&allowCategoryTypes=${CategoryType.Expense}`">
+                <template #after-title>
+                    <div class="item-actual-title">
+                        <span>{{ tt('Transaction Categories Included in Variable Spending') }}</span>
+                    </div>
+                </template>
+                <template #after>
+                    <f7-preloader v-if="loadingTransactionCategories" />
+                    <div v-else-if="!loadingTransactionCategories">{{ transactionCategoriesIncludedInVariableSpendingDisplayContent }}</div>
+                </template>
+            </f7-list-item>
+        </f7-list>
+
         <f7-block-title>{{ tt('Transaction List Page') }}</f7-block-title>
         <f7-list strong inset dividers class="settings-list">
             <f7-list-item>
@@ -293,12 +320,23 @@ const {
     accountsIncludedInHomePageOverviewDisplayContent,
     accountsIncludedInTotalDisplayContent,
     accountCategorysDisplayOrderContent,
-    transactionCategoriesIncludedInHomePageOverviewDisplayContent
+    transactionCategoriesIncludedInHomePageOverviewDisplayContent,
+    transactionCategoriesIncludedInVariableSpendingDisplayContent
 } = useAppSettingPageBase();
 
 const settingsStore = useSettingsStore();
 const accountsStore = useAccountsStore();
 const transactionCategoriesStore = useTransactionCategoriesStore();
+
+const monthlyVariableBudgetValue = computed<number | string>(() => {
+    const raw = settingsStore.appSettings.monthlyVariableBudgetInHomePage;
+    return raw > 0 ? raw / 100 : '';
+});
+
+function onMonthlyBudgetInput(e: Event): void {
+    const val = parseFloat((e.target as HTMLInputElement).value);
+    settingsStore.setMonthlyVariableBudgetInHomePage(isNaN(val) || val < 0 ? 0 : Math.round(val * 100));
+}
 
 const showTimezoneUsedForStatisticsInHomePagePopup = ref<boolean>(false);
 const showQuickSaveButtonStyleInMobileTransactionListPagePopup = ref<boolean>(false);

@@ -131,6 +131,9 @@ export const useOverviewStore = defineStore('overview', () => {
     const variableExpenseData = ref<TransactionAmountsResponseItem | null>(null);
     const variableExpenseStateInvalid = ref<boolean>(true);
 
+    const variableExpenseWeekData = ref<TransactionAmountsResponseItem | null>(null);
+    const variableExpenseWeekStateInvalid = ref<boolean>(true);
+
     const weeklyExpenseData = ref<TransactionStatisticResponse[] | null>(null);
     const weeklyExpenseRanges = ref<StartEndTime[]>([]);
     const weeklyExpenseStateInvalid = ref<boolean>(true);
@@ -255,6 +258,59 @@ export const useOverviewStore = defineStore('overview', () => {
         };
     });
 
+    const variableExpenseThisWeek = computed<TransactionOverviewResponseItem>(() => {
+        const item = variableExpenseWeekData.value;
+
+        if (!item) {
+            return {
+                valid: false,
+                incomeAmount: 0,
+                expenseAmount: 0,
+                incompleteIncomeAmount: false,
+                incompleteExpenseAmount: false
+            };
+        }
+
+        const defaultCurrency = userStore.currentUserDefaultCurrency;
+        let totalIncomeAmount = 0;
+        let totalExpenseAmount = 0;
+        let hasUnCalculatedTotalIncome = false;
+        let hasUnCalculatedTotalExpense = false;
+
+        if (item.amounts) {
+            for (const amount of item.amounts) {
+                if (amount.currency !== defaultCurrency) {
+                    const incomeAmount = exchangeRatesStore.getExchangedAmount(amount.incomeAmount, amount.currency, defaultCurrency);
+                    const expenseAmount = exchangeRatesStore.getExchangedAmount(amount.expenseAmount, amount.currency, defaultCurrency);
+
+                    if (isNumber(incomeAmount)) {
+                        totalIncomeAmount += Math.trunc(incomeAmount);
+                    } else {
+                        hasUnCalculatedTotalIncome = true;
+                    }
+
+                    if (isNumber(expenseAmount)) {
+                        totalExpenseAmount += Math.trunc(expenseAmount);
+                    } else {
+                        hasUnCalculatedTotalExpense = true;
+                    }
+                } else {
+                    totalIncomeAmount += amount.incomeAmount;
+                    totalExpenseAmount += amount.expenseAmount;
+                }
+            }
+        }
+
+        return {
+            valid: true,
+            incomeAmount: totalIncomeAmount,
+            expenseAmount: totalExpenseAmount,
+            incompleteIncomeAmount: hasUnCalculatedTotalIncome,
+            incompleteExpenseAmount: hasUnCalculatedTotalExpense,
+            amounts: item.amounts || []
+        };
+    });
+
     function getTransactionDateRange(): TransactionDataRange {
         const dateRange: TransactionDataRange = {
             today: { startTime: 0, endTime: 0 },
@@ -318,6 +374,10 @@ export const useOverviewStore = defineStore('overview', () => {
         variableExpenseStateInvalid.value = invalidState;
     }
 
+    function updateVariableExpenseWeekInvalidState(invalidState: boolean): void {
+        variableExpenseWeekStateInvalid.value = invalidState;
+    }
+
     function updateWeeklyExpenseInvalidState(invalidState: boolean): void {
         weeklyExpenseStateInvalid.value = invalidState;
     }
@@ -329,6 +389,8 @@ export const useOverviewStore = defineStore('overview', () => {
         transactionOverviewStateInvalid.value = true;
         variableExpenseData.value = null;
         variableExpenseStateInvalid.value = true;
+        variableExpenseWeekData.value = null;
+        variableExpenseWeekStateInvalid.value = true;
         weeklyExpenseData.value = null;
         weeklyExpenseRanges.value = [];
         weeklyExpenseStateInvalid.value = true;
@@ -468,6 +530,56 @@ export const useOverviewStore = defineStore('overview', () => {
         });
     }
 
+    function loadVariableExpenseThisWeek({ force }: { force: boolean }): Promise<TransactionAmountsResponseItem | null> {
+        if (transactionDataRange.value.today.startTime !== getTodayFirstUnixTime()) {
+            updateTransactionDateRange();
+            variableExpenseWeekStateInvalid.value = true;
+        }
+
+        if (!force && !variableExpenseWeekStateInvalid.value) {
+            return new Promise((resolve) => {
+                resolve(variableExpenseWeekData.value);
+            });
+        }
+
+        const requestParams: TransactionAmountsRequestParams = {
+            useTransactionTimezone: settingsStore.appSettings.timezoneUsedForStatisticsInHomePage === TimezoneTypeForStatistics.TransactionTimezone.type,
+            thisWeek: transactionDataRange.value.thisWeek
+        };
+
+        const excludeAccountIds: string[] = objectFieldWithValueToArrayItem(settingsStore.appSettings.overviewAccountFilterInHomePage, true);
+        const excludeCategoryIdsMap: Record<string, boolean> = Object.assign({},
+            settingsStore.appSettings.overviewTransactionCategoryFilterInHomePage,
+            settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage);
+        const excludeCategoryIds: string[] = objectFieldWithValueToArrayItem(excludeCategoryIdsMap, true);
+
+        return new Promise((resolve, reject) => {
+            services.getTransactionAmounts(requestParams, excludeAccountIds, excludeCategoryIds).then(response => {
+                const data = response.data;
+
+                if (!data || !data.success || !data.result) {
+                    reject({ message: 'Unable to retrieve transaction overview' });
+                    return;
+                }
+
+                variableExpenseWeekData.value = data.result.thisWeek || null;
+                variableExpenseWeekStateInvalid.value = false;
+
+                resolve(variableExpenseWeekData.value);
+            }).catch(error => {
+                logger.error('failed to load variable expense weekly overview', error);
+
+                if (error.response && error.response.data && error.response.data.errorMessage) {
+                    reject({ error: error.response.data });
+                } else if (!error.processed) {
+                    reject({ message: 'Unable to retrieve transaction overview' });
+                } else {
+                    reject(error);
+                }
+            });
+        });
+    }
+
     function getWeeksOfThisMonth(firstDayOfWeek: number): StartEndTime[] {
         const now = new Date();
         const year = now.getFullYear();
@@ -592,13 +704,16 @@ export const useOverviewStore = defineStore('overview', () => {
         // computed states,
         transactionOverview,
         variableExpenseThisMonth,
+        variableExpenseThisWeek,
         // functions
         updateTransactionOverviewInvalidState,
         updateVariableExpenseInvalidState,
+        updateVariableExpenseWeekInvalidState,
         updateWeeklyExpenseInvalidState,
         resetTransactionOverview,
         loadTransactionOverview,
         loadVariableExpenseThisMonth,
+        loadVariableExpenseThisWeek,
         loadWeeklyExpenseStatistics,
         getTransactionListPageParams
     };
