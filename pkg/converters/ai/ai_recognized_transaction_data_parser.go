@@ -66,7 +66,10 @@ func (p *aiTransactionDataParser) parseText(c core.Context, user *models.User, f
 
 // parseText processes the input image data and returns the recognized transaction results using AI
 func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, imageData []byte, additionalPrompt string, additionalOptions converter.TransactionDataImporterOptions, defaultTimezone *time.Location, accountMap map[string]*models.Account, expenseCategoryMap map[string]map[string]*models.TransactionCategory, incomeCategoryMap map[string]map[string]*models.TransactionCategory, transferCategoryMap map[string]map[string]*models.TransactionCategory, tagMap map[string]*models.TransactionTag) ([]*models.RecognizedTransactionResult, error) {
-	if p.currentConfig == nil || p.currentConfig.ReceiptImageRecognitionLLMConfig == nil || p.currentConfig.ReceiptImageRecognitionLLMConfig.LLMProvider == "" || !p.currentConfig.TransactionFromAIImageRecognition {
+	imageRecognitionEnabled := p.currentConfig != nil && p.currentConfig.ReceiptImageRecognitionLLMConfig != nil && p.currentConfig.ReceiptImageRecognitionLLMConfig.LLMProvider != "" && p.currentConfig.TransactionFromAIImageRecognition
+	itemRecognitionEnabled := p.currentConfig != nil && p.currentConfig.ItemRecognitionLLMConfig != nil && p.currentConfig.ItemRecognitionLLMConfig.LLMProvider != "" && p.currentConfig.TransactionItemRecognitionEnabled
+
+	if p.currentConfig == nil || (!imageRecognitionEnabled && !itemRecognitionEnabled) {
 		return nil, errs.ErrLargeLanguageModelProviderNotEnabled
 	}
 
@@ -75,7 +78,13 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 		return nil, errs.ErrNotFoundTransactionDataInFile
 	}
 
-	systemPrompt, err := p.buildRecognitionSystemPrompt(c, user, templates.SYSTEM_PROMPT_BATCH_RECEIPT_IMAGE_RECOGNITION, additionalPrompt, defaultTimezone, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
+	promptTemplate := templates.SYSTEM_PROMPT_BATCH_RECEIPT_IMAGE_RECOGNITION
+
+	if itemRecognitionEnabled {
+		promptTemplate = templates.SYSTEM_PROMPT_BATCH_RECEIPT_ITEM_RECOGNITION
+	}
+
+	systemPrompt, err := p.buildRecognitionSystemPrompt(c, user, promptTemplate, additionalPrompt, defaultTimezone, accountMap, expenseCategoryMap, incomeCategoryMap, transferCategoryMap, tagMap)
 
 	if err != nil {
 		return nil, err
@@ -89,7 +98,13 @@ func (p *aiTransactionDataParser) parseImage(c core.Context, user *models.User, 
 		UserPromptContentType: additionalOptions.GetAIImageContentType(),
 	}
 
-	llmResponse, err := llm.Container.GetJsonResponseByReceiptImageRecognitionModel(c, user.Uid, p.currentConfig, llmRequest)
+	var llmResponse *data.LargeLanguageModelTextualResponse
+
+	if itemRecognitionEnabled {
+		llmResponse, err = llm.Container.GetJsonResponseByItemRecognitionModel(c, user.Uid, p.currentConfig, llmRequest)
+	} else {
+		llmResponse, err = llm.Container.GetJsonResponseByReceiptImageRecognitionModel(c, user.Uid, p.currentConfig, llmRequest)
+	}
 
 	if err != nil {
 		log.Errorf(c, "[ai_recognized_transaction_data_parser.parseImage] failed to get llm response for user \"uid:%d\", because %s", user.Uid, err.Error())
@@ -196,7 +211,10 @@ func createNewAITextTransactionDataParser(currentConfig *settings.Config) (*aiTr
 }
 
 func createNewAIImageTransactionDataParser(currentConfig *settings.Config) (*aiTransactionDataParser, error) {
-	if currentConfig == nil || currentConfig.ReceiptImageRecognitionLLMConfig == nil || currentConfig.ReceiptImageRecognitionLLMConfig.LLMProvider == "" || !currentConfig.TransactionFromAIImageRecognition {
+	imageRecognitionEnabled := currentConfig != nil && currentConfig.ReceiptImageRecognitionLLMConfig != nil && currentConfig.ReceiptImageRecognitionLLMConfig.LLMProvider != "" && currentConfig.TransactionFromAIImageRecognition
+	itemRecognitionEnabled := currentConfig != nil && currentConfig.ItemRecognitionLLMConfig != nil && currentConfig.ItemRecognitionLLMConfig.LLMProvider != "" && currentConfig.TransactionItemRecognitionEnabled
+
+	if currentConfig == nil || (!imageRecognitionEnabled && !itemRecognitionEnabled) {
 		return nil, errs.ErrLargeLanguageModelProviderNotEnabled
 	}
 

@@ -359,6 +359,7 @@ type Config struct {
 	// Large Language Model
 	TransactionFromAITextRecognition  bool
 	TransactionFromAIImageRecognition bool
+	TransactionItemRecognitionEnabled bool
 	MaxAIRecognitionPictureFileSize   uint32
 
 	// Large Language Model for Transaction Text Recognition
@@ -366,6 +367,9 @@ type Config struct {
 
 	// Large Language Model for Receipt Image Recognition
 	ReceiptImageRecognitionLLMConfig *LLMConfig
+
+	// Large Language Model for Receipt Line Item Recognition
+	ItemRecognitionLLMConfig *LLMConfig
 
 	// Uuid
 	UuidGeneratorType string
@@ -549,6 +553,12 @@ func LoadConfiguration(configFilePath string) (*Config, error) {
 	}
 
 	config.ReceiptImageRecognitionLLMConfig, err = loadLLMConfiguration(cfgFile, "llm_image_recognition")
+
+	if err != nil {
+		return nil, err
+	}
+
+	config.ItemRecognitionLLMConfig, err = loadLLMConfiguration(cfgFile, "llm_item_recognition")
 
 	if err != nil {
 		return nil, err
@@ -879,6 +889,7 @@ func loadStorageConfiguration(config *Config, configFile *ini.File, sectionName 
 func loadLLMGlobalConfiguration(config *Config, configFile *ini.File, sectionName string) error {
 	config.TransactionFromAITextRecognition = getConfigItemBoolValue(configFile, sectionName, "transaction_from_ai_text_recognition", false)
 	config.TransactionFromAIImageRecognition = getConfigItemBoolValue(configFile, sectionName, "transaction_from_ai_image_recognition", false)
+	config.TransactionItemRecognitionEnabled = getConfigItemBoolValue(configFile, sectionName, "transaction_item_recognition_enabled", false)
 	config.MaxAIRecognitionPictureFileSize = getConfigItemUint32Value(configFile, sectionName, "max_ai_recognition_picture_size", defaultAIRecognitionPictureMaxSize)
 
 	return nil

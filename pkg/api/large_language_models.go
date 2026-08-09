@@ -149,7 +149,10 @@ func (a *LargeLanguageModelsApi) RecognizeTransactionTextHandler(c *core.WebCont
 
 // RecognizeReceiptImageHandler returns the recognized receipt image result
 func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext) (any, *errs.Error) {
-	if a.CurrentConfig().ReceiptImageRecognitionLLMConfig == nil || a.CurrentConfig().ReceiptImageRecognitionLLMConfig.LLMProvider == "" || !a.CurrentConfig().TransactionFromAIImageRecognition {
+	imageRecognitionEnabled := a.CurrentConfig().ReceiptImageRecognitionLLMConfig != nil && a.CurrentConfig().ReceiptImageRecognitionLLMConfig.LLMProvider != "" && a.CurrentConfig().TransactionFromAIImageRecognition
+	itemRecognitionEnabled := a.CurrentConfig().ItemRecognitionLLMConfig != nil && a.CurrentConfig().ItemRecognitionLLMConfig.LLMProvider != "" && a.CurrentConfig().TransactionItemRecognitionEnabled
+
+	if !imageRecognitionEnabled && !itemRecognitionEnabled {
 		return nil, errs.ErrLargeLanguageModelProviderNotEnabled
 	}
 
@@ -229,7 +232,13 @@ func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext
 		return nil, errs.Or(err, errs.ErrOperationFailed)
 	}
 
-	systemPrompt, err := templates.GetTemplate(templates.SYSTEM_PROMPT_RECEIPT_IMAGE_RECOGNITION)
+	receiptPromptTemplate := templates.SYSTEM_PROMPT_RECEIPT_IMAGE_RECOGNITION
+
+	if itemRecognitionEnabled {
+		receiptPromptTemplate = templates.SYSTEM_PROMPT_RECEIPT_ITEM_RECOGNITION
+	}
+
+	systemPrompt, err := templates.GetTemplate(receiptPromptTemplate)
 
 	if err != nil {
 		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to get system prompt template for user \"uid:%d\", because %s", uid, err.Error())
@@ -262,7 +271,13 @@ func (a *LargeLanguageModelsApi) RecognizeReceiptImageHandler(c *core.WebContext
 		UserPromptContentType: contentType,
 	}
 
-	llmResponse, err := llm.Container.GetJsonResponseByReceiptImageRecognitionModel(c, c.GetCurrentUid(), a.CurrentConfig(), llmRequest)
+	var llmResponse *data.LargeLanguageModelTextualResponse
+
+	if itemRecognitionEnabled {
+		llmResponse, err = llm.Container.GetJsonResponseByItemRecognitionModel(c, c.GetCurrentUid(), a.CurrentConfig(), llmRequest)
+	} else {
+		llmResponse, err = llm.Container.GetJsonResponseByReceiptImageRecognitionModel(c, c.GetCurrentUid(), a.CurrentConfig(), llmRequest)
+	}
 
 	if err != nil {
 		log.Errorf(c, "[large_language_models.RecognizeReceiptImageHandler] failed to get llm response user \"uid:%d\", because %s", uid, err.Error())
@@ -473,7 +488,53 @@ func (a *LargeLanguageModelsApi) parseRecognizedTransactionResponse(c *core.WebC
 		recognizedTransactionResponse.Comment = recognizedResult.Description
 	}
 
+	if len(recognizedResult.Items) > 0 {
+		recognizedTransactionResponse.Items = a.parseRecognizedTransactionItems(c, uid, recognizedResult.Items)
+	}
+
 	return recognizedTransactionResponse, nil
+}
+
+// parseRecognizedTransactionItems converts the raw recognized line items into view-objects, skipping any item whose price cannot be parsed
+func (a *LargeLanguageModelsApi) parseRecognizedTransactionItems(c *core.WebContext, uid int64, recognizedItems []*models.RecognizedTransactionItemResult) []*models.RecognizedTransactionItemResponse {
+	items := make([]*models.RecognizedTransactionItemResponse, 0, len(recognizedItems))
+
+	for _, recognizedItem := range recognizedItems {
+		if recognizedItem == nil || len(recognizedItem.Name) == 0 || len(recognizedItem.TotalPrice) == 0 {
+			continue
+		}
+
+		totalPrice, err := utils.ParseAmount(recognizedItem.TotalPrice)
+
+		if err != nil {
+			log.Warnf(c, "[large_language_models.parseRecognizedTransactionItems] recoginzed item total price \"%s\" is invalid for user \"uid:%d\"", recognizedItem.TotalPrice, uid)
+			continue
+		}
+
+		item := &models.RecognizedTransactionItemResponse{
+			RawName:    recognizedItem.Name,
+			TotalPrice: totalPrice,
+			StoreName:  recognizedItem.StoreName,
+		}
+
+		quantity := 1.0
+
+		if len(recognizedItem.Quantity) > 0 {
+			parsedQuantity, err := utils.StringToFloat64(recognizedItem.Quantity)
+
+			if err == nil && parsedQuantity > 0 {
+				quantity = parsedQuantity
+			}
+		}
+
+		item.Quantity = quantity
+		item.Unit = recognizedItem.Unit
+		item.NormalizedQuantity, item.NormalizedUnit, _ = utils.NormalizeQuantityUnit(quantity, recognizedItem.Unit)
+
+		items = append(items, item)
+	}
+
+	return items
 }
 
 func (a *LargeLanguageModelsApi) getLongDateTime(dateTime string) string {

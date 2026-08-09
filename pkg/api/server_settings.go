@@ -72,6 +72,12 @@ func (a *ServerSettingsApi) ServerSettingsJavascriptHandler(c *core.WebContext) 
 		}
 	}
 
+	if config.ItemRecognitionLLMConfig != nil && config.ItemRecognitionLLMConfig.LLMProvider != "" {
+		if config.TransactionItemRecognitionEnabled {
+			a.appendBooleanSetting(builder, "llmiir", config.TransactionItemRecognitionEnabled)
+		}
+	}
+
 	if config.LoginPageTips.Enabled {
 		a.appendMultiLanguageTipSetting(builder, "lpt", config.LoginPageTips)
 	}
