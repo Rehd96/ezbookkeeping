@@ -4,6 +4,12 @@
             <div class="d-flex align-center">
                 <span>{{ tt('Weekly Spending Breakdown') }}</span>
                 <span class="text-body-2 ms-3">{{ monthDisplayName }}</span>
+                <v-spacer/>
+                <v-btn class="ms-2" size="small" variant="text" density="comfortable"
+                       :prepend-icon="allExpanded ? mdiUnfoldLessHorizontal : mdiUnfoldMoreHorizontal"
+                       v-if="!loading && hasExpandableRows" @click="toggleExpandAll">
+                    {{ allExpanded ? tt('Collapse All') : tt('Expand All') }}
+                </v-btn>
             </div>
         </template>
 
@@ -28,17 +34,43 @@
                 </tr>
             </tbody>
             <tbody v-else>
-                <tr :key="row.categoryId" v-for="row in rows">
-                    <td>{{ row.categoryName }}</td>
-                    <td class="text-end" :class="{ 'weekly-spending-current-week': weekIdx === currentWeekIndex }"
-                        :key="weekIdx" v-for="(weekAmount, weekIdx) in row.weekAmounts">
-                        <router-link class="weekly-spending-cell-link" :to="getCellDetailsLink(row.categoryId, weekIdx)"
-                                     v-if="weekAmount !== 0 && showAmountInHomePage">{{ getDisplayAmount(weekAmount) }}</router-link>
-                        <span v-else-if="weekAmount !== 0">{{ getDisplayAmount(weekAmount) }}</span>
-                        <span class="text-disabled" v-else>-</span>
-                    </td>
-                    <td class="text-end font-weight-medium">{{ getDisplayAmount(row.totalAmount, row.incomplete) }}</td>
-                </tr>
+                <template :key="row.categoryId" v-for="row in rows">
+                    <tr :class="{ 'weekly-spending-group-row': row.children.length > 0 }">
+                        <td>
+                            <div class="d-flex align-center">
+                                <v-icon class="weekly-spending-expand-icon me-1" size="small"
+                                        :icon="isExpanded(row.categoryId) ? mdiChevronDown : mdiChevronRight"
+                                        v-if="row.children.length > 0" @click="toggleExpand(row.categoryId)"></v-icon>
+                                <span class="weekly-spending-expand-spacer me-1" v-else></span>
+                                <span :class="{ 'font-weight-medium cursor-pointer': row.children.length > 0 }"
+                                      @click="row.children.length > 0 && toggleExpand(row.categoryId)">{{ row.categoryName }}</span>
+                                <span class="text-disabled text-caption ms-2" v-if="row.children.length > 0">{{ row.children.length }}</span>
+                            </div>
+                        </td>
+                        <td class="text-end" :class="{ 'weekly-spending-current-week': weekIdx === currentWeekIndex }"
+                            :key="weekIdx" v-for="(weekAmount, weekIdx) in row.weekAmounts">
+                            <router-link class="weekly-spending-cell-link" :to="getCellDetailsLink(row.categoryIds, weekIdx)"
+                                         v-if="weekAmount !== 0 && showAmountInHomePage">{{ getDisplayAmount(weekAmount) }}</router-link>
+                            <span v-else-if="weekAmount !== 0">{{ getDisplayAmount(weekAmount) }}</span>
+                            <span class="text-disabled" v-else>-</span>
+                        </td>
+                        <td class="text-end font-weight-medium">{{ getDisplayAmount(row.totalAmount, row.incomplete) }}</td>
+                    </tr>
+                    <tr class="weekly-spending-child-row" :key="child.categoryId"
+                        v-for="child in row.children" v-show="isExpanded(row.categoryId)">
+                        <td>
+                            <span class="weekly-spending-child-name">{{ child.categoryName }}</span>
+                        </td>
+                        <td class="text-end" :class="{ 'weekly-spending-current-week': weekIdx === currentWeekIndex }"
+                            :key="weekIdx" v-for="(weekAmount, weekIdx) in child.weekAmounts">
+                            <router-link class="weekly-spending-cell-link" :to="getCellDetailsLink(child.categoryIds, weekIdx)"
+                                         v-if="weekAmount !== 0 && showAmountInHomePage">{{ getDisplayAmount(weekAmount) }}</router-link>
+                            <span v-else-if="weekAmount !== 0">{{ getDisplayAmount(weekAmount) }}</span>
+                            <span class="text-disabled" v-else>-</span>
+                        </td>
+                        <td class="text-end">{{ getDisplayAmount(child.totalAmount, child.incomplete) }}</td>
+                    </tr>
+                </template>
                 <tr class="weekly-spending-total-row">
                     <td class="font-weight-bold">{{ tt('Total') }}</td>
                     <td class="text-end font-weight-medium" :class="{ 'weekly-spending-current-week': weekIdx === currentWeekIndex }"
@@ -51,7 +83,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import {
+    mdiChevronRight,
+    mdiChevronDown,
+    mdiUnfoldMoreHorizontal,
+    mdiUnfoldLessHorizontal
+} from '@mdi/js';
 
 import { useI18n } from '@/locales/helpers.ts';
 
@@ -71,10 +109,12 @@ import { parseDateTimeFromUnixTime, getCurrentUnixTime } from '@/lib/datetime.ts
 
 interface WeeklySpendingRow {
     categoryId: string;
+    categoryIds: string[];
     categoryName: string;
     weekAmounts: number[];
     totalAmount: number;
     incomplete: boolean;
+    children: WeeklySpendingRow[];
 }
 
 defineProps<{
@@ -100,6 +140,8 @@ const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurre
 
 const weekRanges = computed<StartEndTime[]>(() => overviewStore.weeklyExpenseRanges);
 
+const collapsedGroupIds = ref<Record<string, boolean>>({});
+
 const monthDisplayName = computed<string>(() => {
     if (!weekRanges.value.length) {
         return '';
@@ -122,6 +164,18 @@ const currentWeekIndex = computed<number>(() => {
     return -1;
 });
 
+function newRow(categoryId: string, categoryName: string): WeeklySpendingRow {
+    return {
+        categoryId,
+        categoryIds: [],
+        categoryName,
+        weekAmounts: weekRanges.value.map(() => 0),
+        totalAmount: 0,
+        incomplete: false,
+        children: []
+    };
+}
+
 const rows = computed<WeeklySpendingRow[]>(() => {
     const weekData = overviewStore.weeklyExpenseData;
 
@@ -129,7 +183,8 @@ const rows = computed<WeeklySpendingRow[]>(() => {
         return [];
     }
 
-    const rowsByCategoryId: Record<string, WeeklySpendingRow> = {};
+    const groups: Record<string, WeeklySpendingRow> = {};
+    const leaves: Record<string, WeeklySpendingRow> = {};
 
     for (let weekIdx = 0; weekIdx < weekData.length; weekIdx++) {
         const weekResponse = weekData[weekIdx];
@@ -160,38 +215,90 @@ const rows = computed<WeeklySpendingRow[]>(() => {
                 }
             }
 
-            let row = rowsByCategoryId[item.categoryId];
+            const hasParent = !!category.parentId && category.parentId !== '0'
+                && !!transactionCategoriesStore.allTransactionCategoriesMap[category.parentId];
+            const parent = hasParent ? transactionCategoriesStore.allTransactionCategoriesMap[category.parentId]! : category;
 
-            if (!row) {
-                row = {
-                    categoryId: item.categoryId,
-                    categoryName: category.name,
-                    weekAmounts: weekData.map(() => 0),
-                    totalAmount: 0,
-                    incomplete: false
-                };
-                rowsByCategoryId[item.categoryId] = row;
+            let group = groups[parent.id];
+
+            if (!group) {
+                group = newRow(parent.id, parent.name);
+                groups[parent.id] = group;
+            }
+
+            let target = group;
+
+            if (hasParent) {
+                let leaf = leaves[category.id];
+
+                if (!leaf) {
+                    leaf = newRow(category.id, category.name);
+                    leaf.categoryIds = [category.id];
+                    leaves[category.id] = leaf;
+                    group.children.push(leaf);
+                }
+
+                target = leaf;
+            }
+
+            if (group.categoryIds.indexOf(category.id) < 0) {
+                group.categoryIds.push(category.id);
             }
 
             if (amount !== null) {
-                row.weekAmounts[weekIdx] = (row.weekAmounts[weekIdx] ?? 0) + amount;
-                row.totalAmount += amount;
+                group.weekAmounts[weekIdx] = (group.weekAmounts[weekIdx] ?? 0) + amount;
+                group.totalAmount += amount;
+
+                if (target !== group) {
+                    target.weekAmounts[weekIdx] = (target.weekAmounts[weekIdx] ?? 0) + amount;
+                    target.totalAmount += amount;
+                }
             }
 
-            row.incomplete = row.incomplete || incomplete;
+            group.incomplete = group.incomplete || incomplete;
+
+            if (target !== group) {
+                target.incomplete = target.incomplete || incomplete;
+            }
         }
     }
 
-    const allRows: WeeklySpendingRow[] = [];
-
-    for (const categoryId of Object.keys(rowsByCategoryId)) {
-        allRows.push(rowsByCategoryId[categoryId]!);
-    }
+    const allRows: WeeklySpendingRow[] = Object.keys(groups).map(id => groups[id]!);
 
     allRows.sort((row1, row2) => row2.totalAmount - row1.totalAmount);
+    allRows.forEach(row => row.children.sort((c1, c2) => c2.totalAmount - c1.totalAmount));
 
     return allRows;
 });
+
+const hasExpandableRows = computed<boolean>(() => rows.value.some(row => row.children.length > 0));
+
+const allExpanded = computed<boolean>(() => rows.value.every(row => row.children.length === 0 || !collapsedGroupIds.value[row.categoryId]));
+
+function isExpanded(categoryId: string): boolean {
+    return !collapsedGroupIds.value[categoryId];
+}
+
+function toggleExpand(categoryId: string): void {
+    collapsedGroupIds.value = {
+        ...collapsedGroupIds.value,
+        [categoryId]: !collapsedGroupIds.value[categoryId]
+    };
+}
+
+function toggleExpandAll(): void {
+    if (allExpanded.value) {
+        const collapsed: Record<string, boolean> = {};
+        rows.value.forEach(row => {
+            if (row.children.length > 0) {
+                collapsed[row.categoryId] = true;
+            }
+        });
+        collapsedGroupIds.value = collapsed;
+    } else {
+        collapsedGroupIds.value = {};
+    }
+}
 
 const weekTotals = computed<number[]>(() => {
     const totals: number[] = weekRanges.value.map(() => 0);
@@ -222,14 +329,14 @@ function getDisplayAmount(amount: number, incomplete?: boolean): string {
     return formatAmountToLocalizedNumeralsWithCurrency(amount, defaultCurrency.value) + (incomplete ? INCOMPLETE_AMOUNT_SUFFIX : '');
 }
 
-function getCellDetailsLink(categoryId: string, weekIdx: number): string {
+function getCellDetailsLink(categoryIds: string[], weekIdx: number): string {
     const week = weekRanges.value[weekIdx];
 
-    if (!week) {
+    if (!week || !categoryIds.length) {
         return '/transaction/list';
     }
 
-    return `/transaction/list?categoryIds=${categoryId}&dateType=${DateRange.Custom.type}&minTime=${week.startTime}&maxTime=${week.endTime}`;
+    return `/transaction/list?categoryIds=${categoryIds.join(',')}&dateType=${DateRange.Custom.type}&minTime=${week.startTime}&maxTime=${week.endTime}`;
 }
 </script>
 
@@ -240,6 +347,28 @@ function getCellDetailsLink(categoryId: string, weekIdx: number): string {
 
 .weekly-spending-table .weekly-spending-total-row td {
     border-top: thin solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.weekly-spending-table .weekly-spending-child-row td {
+    border-bottom: none;
+}
+
+.weekly-spending-table .weekly-spending-child-row {
+    background-color: rgba(var(--v-theme-on-surface), 0.02);
+}
+
+.weekly-spending-child-name {
+    padding-inline-start: 24px;
+    color: rgba(var(--v-theme-on-surface), 0.7);
+}
+
+.weekly-spending-expand-icon {
+    cursor: pointer;
+}
+
+.weekly-spending-expand-spacer {
+    display: inline-block;
+    width: 18px;
 }
 
 .weekly-spending-cell-link {
