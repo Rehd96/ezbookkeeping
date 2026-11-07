@@ -225,6 +225,68 @@
             </f7-list-item>
         </f7-list>
 
+        <f7-block-title>{{ tt('Cash Flow & Upcoming Obligations') }}</f7-block-title>
+        <f7-card class="cashflow-mobile-card">
+            <f7-card-content>
+                <div v-if="mobileIntesaShortfall > 0" class="shortfall-alert-box margin-bottom-half">
+                    <span class="text-color-red font-weight-bold">⚠️ {{ tt('Intesa Shortfall') }}: {{ fmt(mobileIntesaShortfall) }}</span>
+                    <small class="display-block text-color-red">{{ tt('Transfer from TR before 20th') }}</small>
+                </div>
+                <div class="display-flex justify-content-space-between align-items-center margin-bottom-half">
+                    <div>
+                        <small class="text-color-gray">{{ tt('Safe-to-Spend Cash') }}</small>
+                        <div class="text-size-large font-weight-bold text-color-primary">{{ fmt(mobileSafeToSpend) }}</div>
+                    </div>
+                    <div class="text-align-right">
+                        <small class="text-color-gray">{{ tt('Pending Fixed Bills') }}</small>
+                        <div class="font-weight-medium text-color-orange">{{ fmt(mobileTotalPendingFixed) }}</div>
+                    </div>
+                </div>
+                <div class="display-flex justify-content-space-between text-size-small text-color-gray">
+                    <span>{{ tt('Liquid Bank Balance') }}: {{ fmt(mobileLiquidCash) }}</span>
+                    <span>Intesa: {{ fmt(mobileIntesaBalance) }}</span>
+                </div>
+            </f7-card-content>
+        </f7-card>
+
+        <f7-list strong inset dividers class="upcoming-bills-mobile-list" v-if="mobilePendingBills.length">
+            <f7-list-item
+                v-for="b in mobilePendingBills"
+                :key="b.name + b.day"
+                :title="b.name"
+                :subtitle="`${b.day} Nov (${getMobileDaysUntilText(b.daysUntil)}) · ${b.account}`"
+                :after="fmt(b.amountCents)"
+            >
+                <template #media>
+                    <f7-icon :f7="b.account === 'Intesa' && mobileIntesaShortfall > 0 ? 'exclamationmark_circle' : 'calendar'"></f7-icon>
+                </template>
+            </f7-list-item>
+        </f7-list>
+
+        <f7-block-title>{{ tt('Trade Republic Yield & Investments') }}</f7-block-title>
+        <f7-card class="investments-mobile-card">
+            <f7-card-content>
+                <div class="display-flex justify-content-space-between align-items-baseline margin-bottom-half">
+                    <span class="font-weight-bold">Trade Republic (2.5%)</span>
+                    <span class="text-color-green font-weight-bold">+{{ (mobileDailyInterest / 100).toFixed(2) }}€ / {{ tt('day') }}</span>
+                </div>
+                <div class="display-flex justify-content-space-between text-size-small text-color-gray margin-bottom">
+                    <span>{{ tt('Cash') }}: {{ fmt(mobileTrCashBalance) }}</span>
+                    <span>~{{ fmt(mobileMonthlyInterest) }} / {{ tt('month') }}</span>
+                </div>
+                <div class="display-flex justify-content-space-between align-items-baseline border-top padding-top-half">
+                    <span class="font-weight-bold">Conto Investiti</span>
+                    <span :class="mobileIsPositivePnl ? 'text-color-green' : 'text-color-red'" class="font-weight-bold">
+                        {{ mobileIsPositivePnl ? '+' : '' }}{{ mobilePnlPercent.toFixed(1) }}% ({{ fmt(mobilePnlCents) }})
+                    </span>
+                </div>
+                <div class="display-flex justify-content-space-between text-size-small text-color-gray">
+                    <span>{{ tt('Cost Basis') }}: {{ fmt(mobileInvestedBasis) }}</span>
+                    <span>{{ tt('Valuation') }}: {{ fmt(mobileMarketValuation) }}</span>
+                </div>
+            </f7-card-content>
+        </f7-card>
+
         <f7-block-title v-if="weeklySpendingRows.length || loading">{{ tt('Weekly Spending Breakdown') }}</f7-block-title>
         <f7-list strong inset dividers class="weekly-spending-list" :class="{ 'skeleton-text': loading }" v-if="weeklySpendingRows.length || loading">
             <f7-list-item v-if="loading" v-for="n in 4" :key="n" title="Loading..." after="..."></f7-list-item>
@@ -512,6 +574,108 @@ const weeklySpendingTotal = computed<number>(() => weeklySpendingRows.value.redu
 function getDisplayWeeklyAmount(amount: number, incomplete?: boolean): string {
     return fmt(amount, incomplete);
 }
+
+// ── Cash Flow & Upcoming Bills (Mobile) ────────────────────────────────────
+
+interface MobileBillDef {
+    day: number;
+    name: string;
+    amountCents: number;
+    account: string;
+}
+
+const STATIC_MOBILE_BILLS: MobileBillDef[] = [
+    { day: 1,  name: 'Canone Conto Intesa',   amountCents: 700,    account: 'Intesa' },
+    { day: 2,  name: 'Affitto (Rent)',         amountCents: 50000,  account: 'Budget Settimana' },
+    { day: 5,  name: 'Finanziamento PC',       amountCents: 3673,   account: 'Intesa' },
+    { day: 5,  name: 'IONOS Spazio Web',       amountCents: 1098,   account: 'Budget Settimana' },
+    { day: 8,  name: 'Fibra Casa (Internet)',  amountCents: 2979,   account: 'Intesa' },
+    { day: 8,  name: 'Amazon Prime Ad-Free',   amountCents: 199,    account: 'Budget Settimana' },
+    { day: 15, name: 'Tariffa Mobile (TIM)',   amountCents: 799,    account: 'Intesa' },
+    { day: 16, name: 'Amazon Prime',           amountCents: 499,    account: 'Budget Settimana' },
+    { day: 16, name: 'PAC Trade Investiti',    amountCents: 5000,   account: 'Trade Republic' },
+    { day: 20, name: 'Rata Auto',              amountCents: 30450,  account: 'Intesa' },
+    { day: 21, name: 'Utenze (Luce & Gas)',    amountCents: 11734,  account: 'Intesa' },
+    { day: 30, name: 'IONOS VPS',              amountCents: 976,    account: 'Budget Settimana' }
+];
+
+const mobileCurrentDay = new Date().getDate();
+
+const mobilePendingBills = computed(() => {
+    return STATIC_MOBILE_BILLS
+        .filter(b => b.day >= mobileCurrentDay)
+        .map(b => ({
+            ...b,
+            daysUntil: b.day - mobileCurrentDay
+        }))
+        .sort((a, b) => a.day - b.day);
+});
+
+function getMobileDaysUntilText(daysUntil: number): string {
+    if (daysUntil === 0) return tt('Today');
+    if (daysUntil === 1) return tt('Tomorrow');
+    return `${tt('In')} ${daysUntil} ${tt('days')}`;
+}
+
+const mobileLiquidCash = computed<number>(() => {
+    let total = 0;
+    for (const acc of accountsStore.allPlainAccounts || []) {
+        if (!acc.hidden && acc.isAsset && !acc.name.toLowerCase().includes('investiti')) {
+            total += acc.balance || 0;
+        }
+    }
+    return total;
+});
+
+const mobileTotalPendingFixed = computed<number>(() =>
+    mobilePendingBills.value.reduce((sum, b) => sum + b.amountCents, 0)
+);
+
+const mobileSafeToSpend = computed<number>(() =>
+    Math.max(0, mobileLiquidCash.value - mobileTotalPendingFixed.value)
+);
+
+const mobileIntesaAccount = computed(() =>
+    (accountsStore.allPlainAccounts || []).find(acc => acc.name.toLowerCase().includes('intesa'))
+);
+const mobileIntesaBalance = computed<number>(() => mobileIntesaAccount.value?.balance || 0);
+
+const mobileIntesaPendingBills = computed(() =>
+    mobilePendingBills.value.filter(b => b.account === 'Intesa')
+);
+const mobileIntesaPendingTotal = computed<number>(() =>
+    mobileIntesaPendingBills.value.reduce((sum, b) => sum + b.amountCents, 0)
+);
+const mobileIntesaShortfall = computed<number>(() =>
+    Math.max(0, mobileIntesaPendingTotal.value - mobileIntesaBalance.value)
+);
+
+// Trade Republic & Investment helpers
+const mobileTrAccount = computed(() =>
+    (accountsStore.allPlainAccounts || []).find(acc => acc.name.toLowerCase() === 'trade republic')
+);
+const mobileTrCashBalance = computed<number>(() => mobileTrAccount.value?.balance || 0);
+const mobileDailyInterest = computed<number>(() => Math.round((mobileTrCashBalance.value * 0.025) / 365));
+const mobileMonthlyInterest = computed<number>(() => Math.round((mobileTrCashBalance.value * 0.025) / 12));
+
+const mobileInvestitiAccount = computed(() =>
+    (accountsStore.allPlainAccounts || []).find(acc => acc.name.toLowerCase().includes('investiti'))
+);
+const mobileInvestedBasis = computed<number>(() => mobileInvestitiAccount.value?.balance || 43551);
+
+const mobileMarketValuation = computed<number>(() => {
+    const saved = localStorage.getItem('ezbk_investiti_market_valuation_cents');
+    if (saved) {
+        const val = parseInt(saved, 10);
+        if (!isNaN(val) && val > 0) return val;
+    }
+    return mobileInvestedBasis.value || 48500;
+});
+const mobilePnlCents = computed<number>(() => mobileMarketValuation.value - mobileInvestedBasis.value);
+const mobilePnlPercent = computed<number>(() =>
+    mobileInvestedBasis.value > 0 ? (mobilePnlCents.value / mobileInvestedBasis.value) * 100 : 0
+);
+const mobileIsPositivePnl = computed<boolean>(() => mobilePnlCents.value >= 0);
 
 const aiImageRecognitionSheet = useTemplateRef<AIImageRecognitionSheetType>('aiImageRecognitionSheet');
 

@@ -191,6 +191,14 @@
         </v-col>
 
         <v-col cols="12">
+            <interactive-cash-flow-card :loading="loadingOverview" :disabled="loadingOverview" :is-dark-mode="isDarkMode" />
+        </v-col>
+
+        <v-col cols="12">
+            <investment-reality-card :loading="loadingOverview" :disabled="loadingOverview" />
+        </v-col>
+
+        <v-col cols="12">
             <weekly-spending-card :loading="loadingOverview" :disabled="loadingOverview" />
         </v-col>
     </v-row>
@@ -205,6 +213,8 @@ import MonthlyIncomeAndExpenseCard, { type MonthlyIncomeAndExpenseCardClickEvent
 import BudgetPaceCard from './overview/cards/BudgetPaceCard.vue';
 import WeeklyBudgetPaceCard from './overview/cards/WeeklyBudgetPaceCard.vue';
 import WeeklySpendingCard from './overview/cards/WeeklySpendingCard.vue';
+import InteractiveCashFlowCard from './overview/cards/InteractiveCashFlowCard.vue';
+import InvestmentRealityCard from './overview/cards/InvestmentRealityCard.vue';
 
 import { ref, computed, useTemplateRef } from 'vue';
 import { useRouter } from 'vue-router';
