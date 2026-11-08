@@ -2705,5 +2705,19 @@
     "An error occurred": "An error occurred",
     "Parameter Invalid": "Parameter Invalid",
     "Numeric Overflow": "Numeric Overflow",
-    "Click to close": "Click to close"
+    "Click to close": "Click to close",
+    "Daily Pacing (Ideale vs. Pivot)": "Daily Pacing (Ideale vs. Pivot)",
+    "Pacing Status (DIFFerenza)": "Pacing Status (DIFFerenza)",
+    "Under Budget (Cushion accumulated)": "Under Budget (Cushion accumulated)",
+    "Over Budget (Pacing too fast)": "Over Budget (Pacing too fast)",
+    "Dynamic Daily Allowance": "Dynamic Daily Allowance",
+    "days left until next paycheck": "days left until next paycheck",
+    "Paycheck Cycle Progress": "Paycheck Cycle Progress",
+    "vs. prior month pace": "vs. prior month pace",
+    "Spese Ideali (Row 67 linear allowance)": "Spese Ideali (Row 67 linear allowance)",
+    "Spese Pivot (Row 68 actual cumulative spend)": "Spese Pivot (Row 68 actual cumulative spend)",
+    "Mese Precedente (Row 35 benchmark ghost line)": "Mese Precedente (Row 35 benchmark ghost line)",
+    "Spese Ideali (Row 67)": "Spese Ideali (Row 67)",
+    "Spese Pivot (Row 68)": "Spese Pivot (Row 68)",
+    "Mese Precedente (Row 35 Ghost)": "Mese Precedente (Row 35 Ghost)"
 }

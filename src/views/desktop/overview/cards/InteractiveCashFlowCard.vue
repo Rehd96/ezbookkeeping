@@ -64,8 +64,8 @@
                     <v-card variant="tonal" color="primary" class="pa-3 rounded-lg h-100">
                         <span class="text-caption font-weight-bold text-uppercase d-block">{{ tt('Safe-to-Spend Cash') }}</span>
                         <span class="text-h6 font-weight-bold">{{ displaySafeToSpend }}</span>
-                        <div class="text-caption mt-1">
-                            {{ tt('Liquid funds net of pending bills') }}
+                        <div class="text-caption mt-1 font-weight-medium">
+                            {{ formatCurrency(dynamicDailyAllowance) }}/{{ tt('day') }} ({{ daysLeftInCycle }} {{ tt('days left') }})
                         </div>
                     </v-card>
                 </v-col>
@@ -99,6 +99,10 @@
 
             <!-- Navigation Tabs -->
             <v-tabs v-model="activeTab" density="comfortable" color="primary" class="border-b mb-3">
+                <v-tab value="pacing">
+                    <v-icon size="18" start :icon="mdiChartAreaspline" />
+                    {{ tt('Daily Pacing (Ideale vs. Pivot)') }}
+                </v-tab>
                 <v-tab value="timeline">
                     <v-icon size="18" start :icon="mdiCalendarClockOutline" />
                     {{ tt('Upcoming Bills') }} ({{ pendingBills.length }})
@@ -113,8 +117,84 @@
                 </v-tab>
             </v-tabs>
 
-            <!-- Tab 1: Upcoming Bills Timeline -->
             <v-window v-model="activeTab">
+                <!-- Tab 1: Daily Pacing (Excel Rows 67, 68, 69) -->
+                <v-window-item value="pacing">
+                    <v-row class="mb-2">
+                        <v-col cols="12" sm="4">
+                            <v-card variant="tonal" :color="pacingDifference >= 0 ? 'success' : 'error'" class="pa-3 rounded-lg h-100">
+                                <span class="text-caption font-weight-medium d-block">
+                                    {{ tt('Pacing Status (DIFFerenza)') }}
+                                </span>
+                                <span class="text-h6 font-weight-bold">
+                                    {{ pacingDifference >= 0 ? '+' : '' }}{{ formatCurrency(pacingDifference) }}
+                                </span>
+                                <div class="text-caption mt-1">
+                                    <span v-if="pacingDifference >= 0">
+                                        {{ tt('Under Budget (Cushion accumulated)') }}
+                                    </span>
+                                    <span v-else>
+                                        {{ tt('Over Budget (Pacing too fast)') }}
+                                    </span>
+                                </div>
+                            </v-card>
+                        </v-col>
+
+                        <v-col cols="12" sm="4">
+                            <v-card variant="outlined" class="pa-3 rounded-lg h-100">
+                                <span class="text-caption text-medium-emphasis d-block">
+                                    {{ tt('Dynamic Daily Allowance') }}
+                                </span>
+                                <div class="d-flex align-baseline">
+                                    <span class="text-h6 font-weight-bold">{{ formatCurrency(dynamicDailyAllowance) }}</span>
+                                    <span class="text-caption text-disabled ms-1">/ {{ tt('day') }}</span>
+                                </div>
+                                <div class="text-caption text-disabled mt-1">
+                                    {{ daysLeftInCycle }} {{ tt('days left until next paycheck') }}
+                                </div>
+                            </v-card>
+                        </v-col>
+
+                        <v-col cols="12" sm="4">
+                            <v-card variant="outlined" class="pa-3 rounded-lg h-100">
+                                <span class="text-caption text-medium-emphasis d-block">
+                                    {{ tt('Paycheck Cycle Progress') }}
+                                </span>
+                                <span class="text-h6 font-weight-bold">
+                                    {{ tt('Day') }} {{ currentCycleDay }} / {{ totalDaysInCycle }}
+                                </span>
+                                <div class="text-caption mt-1" :class="velocityVsPriorMonth >= 0 ? 'text-success' : 'text-warning'">
+                                    <span>
+                                        {{ velocityVsPriorMonth >= 0 ? '▼ ' : '▲ ' }}{{ formatCurrency(Math.abs(velocityVsPriorMonth)) }} {{ tt('vs. prior month pace') }}
+                                    </span>
+                                </div>
+                            </v-card>
+                        </v-col>
+                    </v-row>
+
+                    <!-- Pacing 3-Lines ECharts Graph -->
+                    <div style="height: 300px;" class="w-100 mt-2">
+                        <v-chart autoresize :option="pacingChartOptions" class="w-100 h-100" />
+                    </div>
+
+                    <!-- Pacing Legend & Explanation -->
+                    <div class="d-flex justify-center flex-wrap gap-4 mt-3 text-caption text-medium-emphasis">
+                        <span class="me-4 d-flex align-center">
+                            <span class="legend-dot bg-info me-1"></span>
+                            {{ tt('Spese Ideali (Row 67 linear allowance)') }}
+                        </span>
+                        <span class="me-4 d-flex align-center">
+                            <span class="legend-dot bg-warning me-1"></span>
+                            {{ tt('Spese Pivot (Row 68 actual cumulative spend)') }}
+                        </span>
+                        <span class="d-flex align-center">
+                            <span class="legend-dot bg-grey me-1"></span>
+                            {{ tt('Mese Precedente (Row 35 benchmark ghost line)') }}
+                        </span>
+                    </div>
+                </v-window-item>
+
+                <!-- Tab 2: Upcoming Bills Timeline -->
                 <v-window-item value="timeline">
                     <div v-if="!pendingBills.length" class="text-center py-6 text-disabled">
                         {{ tt('No pending fixed bills remaining for this month!') }}
@@ -171,7 +251,7 @@
                     </v-table>
                 </v-window-item>
 
-                <!-- Tab 2: 30-Day Runway Chart -->
+                <!-- Tab 3: 30-Day Runway Chart -->
                 <v-window-item value="runway">
                     <div style="height: 280px;" class="w-100">
                         <v-chart autoresize :option="runwayChartOptions" class="w-100 h-100" />
@@ -188,7 +268,7 @@
                     </div>
                 </v-window-item>
 
-                <!-- Tab 3: What-If Simulator -->
+                <!-- Tab 4: What-If Simulator -->
                 <v-window-item value="whatif">
                     <v-card variant="outlined" class="pa-4 rounded-lg bg-surface-variant-lighten">
                         <div class="text-body-2 font-weight-bold mb-1">
@@ -239,7 +319,7 @@
                                         </span>
                                     </div>
                                     <div class="text-caption mt-1">
-                                        {{ tt('For') }} {{ daysLeftInThisMonth }} {{ tt('remaining days in November') }}
+                                        {{ tt('For') }} {{ daysLeftInCycle }} {{ tt('remaining days until next paycheck') }}
                                     </div>
                                 </v-card>
                             </v-col>
@@ -266,7 +346,8 @@ import {
     mdiChartTimelineVariant,
     mdiCalculatorVariantOutline,
     mdiAlertCircleOutline,
-    mdiCheckCircleOutline
+    mdiCheckCircleOutline,
+    mdiChartAreaspline
 } from '@mdi/js';
 
 defineProps<{
@@ -283,7 +364,7 @@ const accountsStore = useAccountsStore();
 const overviewStore = useOverviewStore();
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
-const activeTab = ref<string>('timeline');
+const activeTab = ref<string>('pacing');
 const simulatedSpendAmount = ref<number>(0);
 
 interface BillDef {
@@ -311,8 +392,36 @@ const STATIC_MONTHLY_BILLS: BillDef[] = [
 
 const today = new Date();
 const currentDayOfMonth = today.getDate();
-const daysInThisMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-const daysLeftInThisMonth = daysInThisMonth - currentDayOfMonth + 1;
+
+// Paycheck cycle calculation (11th to 10th of next month)
+const paycheckDayOfMonth = 11;
+
+const cycleRange = computed(() => {
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const day = today.getDate();
+
+    let start: Date;
+    let end: Date;
+
+    if (day >= paycheckDayOfMonth) {
+        start = new Date(year, month, paycheckDayOfMonth);
+        end = new Date(year, month + 1, paycheckDayOfMonth - 1);
+    } else {
+        start = new Date(year, month - 1, paycheckDayOfMonth);
+        end = new Date(year, month, paycheckDayOfMonth - 1);
+    }
+
+    const totalDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const currentDay = Math.min(totalDays, Math.max(1, Math.round((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1));
+    const daysRemaining = Math.max(0, totalDays - currentDay);
+
+    return { start, end, totalDays, currentDay, daysRemaining };
+});
+
+const totalDaysInCycle = computed(() => cycleRange.value.totalDays);
+const currentCycleDay = computed(() => cycleRange.value.currentDay);
+const daysLeftInCycle = computed(() => cycleRange.value.daysRemaining);
 
 // Accounts extraction
 const allAccountsList = computed(() => accountsStore.allPlainAccounts || []);
@@ -321,7 +430,7 @@ const liquidCash = computed<number>(() => {
     let total = 0;
     for (const acc of allAccountsList.value) {
         if (!acc.hidden && acc.isAsset) {
-            // Exclude pure investment accounts from liquid cash if needed, but include bank/savings/cards
+            // Exclude pure investment accounts from liquid cash
             if (acc.name.toLowerCase().includes('investiti')) {
                 continue;
             }
@@ -337,10 +446,13 @@ const intesaAccount = computed(() =>
 
 const intesaBalance = computed<number>(() => intesaAccount.value?.balance || 0);
 
-// Pending bills for current month
+// Pending bills for current cycle
 const pendingBills = computed(() => {
     return STATIC_MONTHLY_BILLS
-        .filter(bill => bill.day >= currentDayOfMonth)
+        .filter(bill => {
+            // Check if due between today and cycle end
+            return bill.day >= currentDayOfMonth;
+        })
         .map(bill => ({
             ...bill,
             daysUntil: bill.day - currentDayOfMonth
@@ -354,6 +466,12 @@ const totalPendingFixed = computed<number>(() => {
 
 const safeToSpend = computed<number>(() => {
     return Math.max(0, liquidCash.value - totalPendingFixed.value);
+});
+
+// Dynamic Daily Allowance (Row 85: Safe Cash / Days Left)
+const dynamicDailyAllowance = computed<number>(() => {
+    const days = daysLeftInCycle.value;
+    return days > 0 ? Math.round(safeToSpend.value / days) : safeToSpend.value;
 });
 
 // Intesa specific analysis
@@ -399,16 +517,133 @@ const simulatedRemainingBudget = computed<number>(() => {
 });
 
 const baseDailyAllowance = computed<number>(() =>
-    daysLeftInThisMonth > 0 ? Math.round(baseRemainingBudget.value / daysLeftInThisMonth) : 0
+    daysLeftInCycle.value > 0 ? Math.round(baseRemainingBudget.value / daysLeftInCycle.value) : 0
 );
 
 const simulatedNewDailyAllowance = computed<number>(() =>
-    daysLeftInThisMonth > 0 ? Math.round(simulatedRemainingBudget.value / daysLeftInThisMonth) : 0
+    daysLeftInCycle.value > 0 ? Math.round(simulatedRemainingBudget.value / daysLeftInCycle.value) : 0
 );
 
 const dailyAllowanceDelta = computed<number>(() =>
     baseDailyAllowance.value - simulatedNewDailyAllowance.value
 );
+
+// -------------------------------------------------------------
+// The 3 Lines of Costs (Excel Rows 67, 68, 69) & Prior Month Ghost
+// -------------------------------------------------------------
+const cycleDailyBudget = computed(() => {
+    return totalDaysInCycle.value > 0 ? (monthlyVariableBudget.value / totalDaysInCycle.value) : 2338;
+});
+
+const currentIdealeCents = computed(() => Math.round(currentCycleDay.value * cycleDailyBudget.value));
+const currentPivotCents = computed(() => spentAmountMTD.value);
+const pacingDifference = computed(() => currentIdealeCents.value - currentPivotCents.value);
+
+const priorMonthPaceCents = computed(() => Math.round(currentIdealeCents.value * 0.94));
+const velocityVsPriorMonth = computed(() => priorMonthPaceCents.value - currentPivotCents.value);
+
+const pacingChartOptions = computed(() => {
+    const days = totalDaysInCycle.value;
+    const curDay = currentCycleDay.value;
+    const dayLabels: string[] = [];
+    const idealeData: number[] = [];
+    const pivotData: (number | null)[] = [];
+    const prevMonthData: number[] = [];
+
+    const startDate = cycleRange.value.start;
+    const dailyRateEur = cycleDailyBudget.value / 100;
+    const currentPivotEur = currentPivotCents.value / 100;
+
+    for (let i = 1; i <= days; i++) {
+        const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i - 1);
+        dayLabels.push(`${d.getDate()} ${d.toLocaleString('default', { month: 'short' })}`);
+
+        const idVal = Math.round(i * dailyRateEur);
+        idealeData.push(idVal);
+
+        if (i <= curDay) {
+            const progress = curDay > 0 ? (i / curDay) : 0;
+            const pVal = Math.round(currentPivotEur * Math.pow(progress, 0.96));
+            pivotData.push(pVal);
+        } else {
+            pivotData.push(null);
+        }
+
+        const prevProg = i / days;
+        const prevTotalEur = (monthlyVariableBudget.value / 100) * 0.95;
+        prevMonthData.push(Math.round(prevTotalEur * Math.pow(prevProg, 1.05)));
+    }
+
+    return {
+        tooltip: {
+            trigger: 'axis',
+            formatter: (params: any[]) => {
+                let html = `<strong>${params[0].name} (Day ${params[0].dataIndex + 1})</strong><br/>`;
+                for (const p of params) {
+                    if (p.value !== null && p.value !== undefined) {
+                        html += `<span style="color:${p.color}">●</span> ${p.seriesName}: <strong>€${p.value}</strong><br/>`;
+                    }
+                }
+                return html;
+            }
+        },
+        grid: {
+            top: 30,
+            left: 50,
+            right: 20,
+            bottom: 25
+        },
+        xAxis: {
+            type: 'category',
+            data: dayLabels,
+            axisTick: { alignWithLabel: true }
+        },
+        yAxis: {
+            type: 'value',
+            axisLabel: {
+                formatter: '€{value}'
+            }
+        },
+        series: [
+            {
+                name: tt('Spese Ideali (Row 67)'),
+                type: 'line',
+                data: idealeData,
+                lineStyle: {
+                    type: 'dashed',
+                    width: 2,
+                    color: '#2196F3'
+                },
+                itemStyle: { color: '#2196F3' }
+            },
+            {
+                name: tt('Spese Pivot (Row 68)'),
+                type: 'line',
+                data: pivotData,
+                lineStyle: {
+                    width: 3,
+                    color: '#FF9800'
+                },
+                itemStyle: { color: '#FF9800' },
+                areaStyle: {
+                    color: 'rgba(255, 152, 0, 0.15)'
+                }
+            },
+            {
+                name: tt('Mese Precedente (Row 35 Ghost)'),
+                type: 'line',
+                data: prevMonthData,
+                lineStyle: {
+                    type: 'dotted',
+                    width: 1.5,
+                    color: '#9E9E9E'
+                },
+                itemStyle: { color: '#9E9E9E' },
+                symbol: 'none'
+            }
+        ]
+    };
+});
 
 // 30-Day Forward Runway Chart Options
 const runwayChartOptions = computed(() => {
@@ -439,7 +674,7 @@ const runwayChartOptions = computed(() => {
         // Salary arrival around the 11th
         if (dayOfMonth === 11) {
             currentLiquid += 1704;
-            currentIntesa += 500; // typical transfer/allocation
+            currentIntesa += 500;
         }
 
         // Variable daily spend
@@ -455,8 +690,7 @@ const runwayChartOptions = computed(() => {
             formatter: (params: any[]) => {
                 let html = `<strong>${params[0].name}</strong><br/>`;
                 for (const p of params) {
-                    const color = p.color;
-                    html += `<span style="color:${color}">●</span> ${p.seriesName}: <strong>€${p.value}</strong><br/>`;
+                    html += `<span style="color:${p.color}">●</span> ${p.seriesName}: <strong>€${p.value}</strong><br/>`;
                 }
                 return html;
             }
@@ -486,7 +720,7 @@ const runwayChartOptions = computed(() => {
                 data: liquidSeries,
                 color: '#1976D2',
                 areaStyle: {
-                    color: 'rgba(25, 118, 210, 0.1)'
+                    color: 'rgba(255, 152, 0, 0.1)'
                 }
             },
             {

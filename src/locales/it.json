@@ -2705,5 +2705,19 @@
     "An error occurred": "Si è verificato un errore",
     "Parameter Invalid": "Parametro non valido",
     "Numeric Overflow": "Overflow numerico",
-    "Click to close": "Clicca per chiudere"
+    "Click to close": "Clicca per chiudere",
+    "Daily Pacing (Ideale vs. Pivot)": "Ritmo Giornaliero (Ideale vs. Pivot)",
+    "Pacing Status (DIFFerenza)": "Stato Andamento (DIFFerenza)",
+    "Under Budget (Cushion accumulated)": "Sotto Budget (Cuscino accumulato)",
+    "Over Budget (Pacing too fast)": "Fuori Budget (Ritmo troppo elevato)",
+    "Dynamic Daily Allowance": "Budget Giornaliero Dinamico",
+    "days left until next paycheck": "giorni al prossimo stipendio",
+    "Paycheck Cycle Progress": "Avanzamento Ciclo Stipendio",
+    "vs. prior month pace": "rispetto al mese precedente",
+    "Spese Ideali (Row 67 linear allowance)": "Spese Ideali (Riga 67 andamento lineare)",
+    "Spese Pivot (Row 68 actual cumulative spend)": "Spese Pivot (Riga 68 andamento effettivo)",
+    "Mese Precedente (Row 35 benchmark ghost line)": "Mese Precedente (Riga 35 andamento riferimento)",
+    "Spese Ideali (Row 67)": "Spese Ideali (Riga 67)",
+    "Spese Pivot (Row 68)": "Spese Pivot (Riga 68)",
+    "Mese Precedente (Row 35 Ghost)": "Mese Precedente (Riga 35)"
 }
