@@ -136,21 +136,46 @@ def send_telegram(text, reply_markup=None):
     except Exception as e:
         log.error("Failed to send telegram msg: %s", e)
 
-def compute_cycle(today):
-    year, month, day = today.year, today.month, today.day
-    if day >= PAYCHECK_START_DAY:
-        start = date(year, month, PAYCHECK_START_DAY)
-        end = date(year + 1, 1, PAYCHECK_START_DAY - 1) if month == 12 else date(year, month + 1, PAYCHECK_START_DAY - 1)
+def get_payday(year, month):
+    """
+    Calculates the salary date as the first weekday after the 27th of the month.
+    """
+    if month == 2:
+        d = date(year, 2, 28)
     else:
-        start = date(year - 1, 12, PAYCHECK_START_DAY) if month == 1 else date(year, month - 1, PAYCHECK_START_DAY)
-        end = date(year, month, PAYCHECK_START_DAY - 1)
+        d = date(year, month, 28)
+    while d.weekday() >= 5: # 5 = Saturday, 6 = Sunday
+        d += timedelta(days=1)
+    return d
+
+def compute_cycle(today):
+    """
+    Computes start, end and next payday based on the rule:
+    first weekday after the 27th of the month.
+    """
+    this_month_payday = get_payday(today.year, today.month)
+    if today >= this_month_payday:
+        start = this_month_payday
+        if today.month == 12:
+            next_payday = get_payday(today.year + 1, 1)
+        else:
+            next_payday = get_payday(today.year, today.month + 1)
+        end = next_payday - timedelta(days=1)
+    else:
+        next_payday = this_month_payday
+        end = next_payday - timedelta(days=1)
+        if today.month == 1:
+            start = get_payday(today.year - 1, 12)
+        else:
+            start = get_payday(today.year, today.month - 1)
     
     total_days = (end - start).days + 1
     days_elapsed = (today - start).days + 1
-    days_remaining = max(1, (end - today).days + 1)
+    days_remaining = max(1, (next_payday - today).days)
     return {
         "start": start,
         "end": end,
+        "next_payday": next_payday,
         "total_days": total_days,
         "days_elapsed": days_elapsed,
         "days_remaining": days_remaining
@@ -191,29 +216,42 @@ def get_financial_status():
     pending_bills = []
     total_pending_bills = 0.0
     intesa_pending = 0.0
+    next_payday = cycle["next_payday"]
+
     for b in RECURRING_BILLS:
         b_day = b["day"]
-        b_date = None
-        if today.day <= b_day <= cycle["end"].day and today.month == cycle["end"].month:
-            b_date = date(today.year, today.month, b_day)
-        elif today.month != cycle["end"].month:
-            if b_day >= today.day:
-                b_date = date(today.year, today.month, b_day)
-            elif b_day <= cycle["end"].day:
-                b_date = date(cycle["end"].year, cycle["end"].month, b_day)
-        
-        if b_date and today <= b_date <= cycle["end"]:
-            days_until = (b_date - today).days
-            item = {**b, "due_date": b_date, "days_until": days_until}
-            pending_bills.append(item)
-            total_pending_bills += b["amount"]
-            if b["account"] == "Intesa":
-                intesa_pending += b["amount"]
+        # Candidate 1: this month
+        try:
+            d1 = date(today.year, today.month, b_day)
+            if today <= d1 < next_payday:
+                days_until = (d1 - today).days
+                pending_bills.append({**b, "due_date": d1, "days_until": days_until})
+                total_pending_bills += b["amount"]
+                if b["account"] == "Intesa":
+                    intesa_pending += b["amount"]
+                continue
+        except ValueError:
+            pass
+
+        # Candidate 2: next month if cycle spans into next month
+        try:
+            m2 = 1 if today.month == 12 else today.month + 1
+            y2 = today.year + 1 if today.month == 12 else today.year
+            d2 = date(y2, m2, b_day)
+            if today <= d2 < next_payday:
+                days_until = (d2 - today).days
+                pending_bills.append({**b, "due_date": d2, "days_until": days_until})
+                total_pending_bills += b["amount"]
+                if b["account"] == "Intesa":
+                    intesa_pending += b["amount"]
+        except ValueError:
+            pass
 
     pending_bills.sort(key=lambda x: x["days_until"])
 
     # 4. Math Pacing
-    ideale_to_date = cycle["days_elapsed"] * STATIC_DAILY_BUDGET
+    daily_budget = MONTHLY_VARIABLE_BUDGET / cycle["total_days"]
+    ideale_to_date = cycle["days_elapsed"] * daily_budget
     differenza = ideale_to_date - variable_spend
     safe_to_spend = max(0.0, liquid_cash - total_pending_bills)
     dynamic_runway = safe_to_spend / cycle["days_remaining"]
@@ -223,6 +261,7 @@ def get_financial_status():
     return {
         "today": today,
         "cycle": cycle,
+        "daily_budget": daily_budget,
         "balances": balances,
         "liquid_cash": liquid_cash,
         "variable_spend": variable_spend,
@@ -245,7 +284,7 @@ def format_oggi_report(s):
 
     msg = [
         f"⚡ <b>BUDGET COACH EZBOOKKEEPING — {s['today'].strftime('%d %b %Y')}</b>",
-        f"📅 Ciclo: <b>{c['start'].strftime('%d %b')} → {c['end'].strftime('%d %b')}</b> (Giorno {c['days_elapsed']} di {c['total_days']} · Mancano {c['days_remaining']} gg)",
+        f"📅 Ciclo: <b>{c['start'].strftime('%d %b')} → {c['end'].strftime('%d %b')}</b> (Giorno {c['days_elapsed']} di {c['total_days']} · Payday: <b>{c['next_payday'].strftime('%d %b')}</b>, tra {c['days_remaining']} gg)",
         "──────────────────────────────",
         "🎯 <b>PACING 3-LINES (MODELLO EXCEL)</b>",
         f"• <b>Ideale (Row 67):</b> €{s['ideale_to_date']:.2f} (tetto consentito)",

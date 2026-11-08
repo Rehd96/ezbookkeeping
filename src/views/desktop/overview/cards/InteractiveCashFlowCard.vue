@@ -391,32 +391,39 @@ const STATIC_MONTHLY_BILLS: BillDef[] = [
 ];
 
 const today = new Date();
-const currentDayOfMonth = today.getDate();
 
-// Paycheck cycle calculation (11th to 10th of next month)
-const paycheckDayOfMonth = 11;
+// Paycheck cycle calculation: first weekday after the 27th of the month
+function getPayday(year: number, month: number): Date {
+    const d = new Date(year, month, 28, 0, 0, 0, 0);
+    while (d.getDay() === 0 || d.getDay() === 6) { // 0 = Sunday, 6 = Saturday
+        d.setDate(d.getDate() + 1);
+    }
+    return d;
+}
 
 const cycleRange = computed(() => {
     const year = today.getFullYear();
     const month = today.getMonth();
-    const day = today.getDate();
 
+    const thisMonthPayday = getPayday(year, month);
     let start: Date;
-    let end: Date;
+    let nextPayday: Date;
 
-    if (day >= paycheckDayOfMonth) {
-        start = new Date(year, month, paycheckDayOfMonth);
-        end = new Date(year, month + 1, paycheckDayOfMonth - 1);
+    if (today.getTime() >= thisMonthPayday.getTime()) {
+        start = thisMonthPayday;
+        nextPayday = getPayday(year, month + 1);
     } else {
-        start = new Date(year, month - 1, paycheckDayOfMonth);
-        end = new Date(year, month, paycheckDayOfMonth - 1);
+        nextPayday = thisMonthPayday;
+        start = getPayday(year, month - 1);
     }
+
+    const end = new Date(nextPayday.getTime() - 24 * 60 * 60 * 1000);
 
     const totalDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     const currentDay = Math.min(totalDays, Math.max(1, Math.round((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1));
-    const daysRemaining = Math.max(0, totalDays - currentDay);
+    const daysRemaining = Math.max(1, Math.round((nextPayday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
 
-    return { start, end, totalDays, currentDay, daysRemaining };
+    return { start, end, nextPayday, totalDays, currentDay, daysRemaining };
 });
 
 const totalDaysInCycle = computed(() => cycleRange.value.totalDays);
@@ -448,16 +455,27 @@ const intesaBalance = computed<number>(() => intesaAccount.value?.balance || 0);
 
 // Pending bills for current cycle
 const pendingBills = computed(() => {
-    return STATIC_MONTHLY_BILLS
-        .filter(bill => {
-            // Check if due between today and cycle end
-            return bill.day >= currentDayOfMonth;
-        })
-        .map(bill => ({
-            ...bill,
-            daysUntil: bill.day - currentDayOfMonth
-        }))
-        .sort((a, b) => a.day - b.day);
+    const nextPayday = cycleRange.value.nextPayday;
+    const list: Array<typeof STATIC_MONTHLY_BILLS[0] & { daysUntil: number, dueDate: Date }> = [];
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+
+    for (const bill of STATIC_MONTHLY_BILLS) {
+        // Check bill in current month
+        const thisMonthDue = new Date(today.getFullYear(), today.getMonth(), bill.day, 0, 0, 0, 0);
+        if (thisMonthDue.getTime() >= todayMidnight.getTime() && thisMonthDue.getTime() < nextPayday.getTime()) {
+            const daysUntil = Math.round((thisMonthDue.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+            list.push({ ...bill, daysUntil, dueDate: thisMonthDue });
+        }
+
+        // Check bill in next month if cycle spans into next month
+        const nextMonthDue = new Date(today.getFullYear(), today.getMonth() + 1, bill.day, 0, 0, 0, 0);
+        if (nextMonthDue.getTime() >= todayMidnight.getTime() && nextMonthDue.getTime() < nextPayday.getTime()) {
+            const daysUntil = Math.round((nextMonthDue.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
+            list.push({ ...bill, daysUntil, dueDate: nextMonthDue });
+        }
+    }
+
+    return list.sort((a, b) => a.daysUntil - b.daysUntil);
 });
 
 const totalPendingFixed = computed<number>(() => {

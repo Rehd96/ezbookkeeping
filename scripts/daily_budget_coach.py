@@ -75,34 +75,47 @@ ACTIVE_STOCK_HOLDINGS = [
 
 BANKED_REALIZED_GAIN = 126.86  # +€87.80 realized trading PnL + €39.06 dividends
 
+def get_payday(year, month):
+    """
+    Calculates the salary date as the first weekday after the 27th of the month.
+    """
+    if month == 2:
+        d = date(year, 2, 28)
+    else:
+        d = date(year, month, 28)
+    while d.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        d += timedelta(days=1)
+    return d
+
 def compute_paycheck_cycle(target_date):
     """
-    Computes the start and end of the paycheck period (11th to 10th of next month).
+    Computes start, end and next payday based on the rule:
+    first weekday after the 27th of the month.
     """
-    year = target_date.year
-    month = target_date.month
-    day = target_date.day
-
-    if day >= PAYCHECK_START_DAY:
-        start = date(year, month, PAYCHECK_START_DAY)
-        if month == 12:
-            end = date(year + 1, 1, PAYCHECK_START_DAY - 1)
+    this_month_payday = get_payday(target_date.year, target_date.month)
+    if target_date >= this_month_payday:
+        start = this_month_payday
+        if target_date.month == 12:
+            next_payday = get_payday(target_date.year + 1, 1)
         else:
-            end = date(year, month + 1, PAYCHECK_START_DAY - 1)
+            next_payday = get_payday(target_date.year, target_date.month + 1)
+        end = next_payday - timedelta(days=1)
     else:
-        if month == 1:
-            start = date(year - 1, 12, PAYCHECK_START_DAY)
+        next_payday = this_month_payday
+        end = next_payday - timedelta(days=1)
+        if target_date.month == 1:
+            start = get_payday(target_date.year - 1, 12)
         else:
-            start = date(year, month - 1, PAYCHECK_START_DAY)
-        end = date(year, month, PAYCHECK_START_DAY - 1)
+            start = get_payday(target_date.year, target_date.month - 1)
 
     total_days = (end - start).days + 1
     days_elapsed = (target_date - start).days + 1
-    days_remaining = (end - target_date).days
+    days_remaining = max(1, (next_payday - target_date).days)
 
     return {
         "start": start,
         "end": end,
+        "next_payday": next_payday,
         "total_days": total_days,
         "days_elapsed": days_elapsed,
         "days_remaining": days_remaining,
