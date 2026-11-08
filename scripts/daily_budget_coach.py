@@ -33,13 +33,8 @@ from collections import defaultdict
 # ---------------------------------------------------------
 # Financial Baselines & Constants (from Excel Model)
 # ---------------------------------------------------------
-MONTHLY_NET_SALARY = 1704.00      # Regular base net paycheck (EUR)
-MONTHLY_VARIABLE_BUDGET = 724.88  # True all-in variable spending cap (EUR)
-STATIC_DAILY_BUDGET = 23.38       # 724.88 / 31 days (EUR/day)
-PAYCHECK_START_DAY = 11           # Salary arrives on the 11th of each month
-TR_INTEREST_RATE = 0.025          # 2.5% p.a. on uninvested cash
-
-# Standard Recurring Bills (Day of month, name, expected amount, account, category)
+MONTHLY_NET_SALARY = 1736.00      # Regular base net paycheck (EUR)
+# Recurring Bills (Day of month, name, expected amount, account, category)
 RECURRING_BILLS = [
     {"day": 1,  "name": "Canone Conto Intesa",   "amount": 7.00,   "account": "Intesa",           "category": "Finanza -> Costi di servizio"},
     {"day": 2,  "name": "Affitto (Rent)",         "amount": 500.00, "account": "Budget Settimana", "category": "Alloggio -> Affitto e Mutuo"},
@@ -54,6 +49,9 @@ RECURRING_BILLS = [
     {"day": 21, "name": "Utenze (Luce & Gas)",    "amount": 117.34, "account": "Intesa",           "category": "Utenze -> Luce e Gas"},
     {"day": 30, "name": "IONOS VPS",              "amount": 9.76,   "account": "Budget Settimana", "category": "Comunicazione -> VPS"},
 ]
+TOTAL_MONTHLY_FIXED = sum(b["amount"] for b in RECURRING_BILLS) # 1081.07 EUR
+MONTHLY_VARIABLE_BUDGET = max(0.0, MONTHLY_NET_SALARY - TOTAL_MONTHLY_FIXED) # 654.93 EUR
+TR_INTEREST_RATE = 0.025          # 2.5% p.a. on uninvested cash
 
 FIXED_CATEGORIES = {
     'Affitto e Mutuo',
@@ -241,33 +239,42 @@ def analyze_financials(csv_path):
     pending_bills.sort(key=lambda x: x['days_until'])
     total_pending_fixed = sum(b['amount'] for b in pending_bills)
 
-    # 5. Liquidity & Safe-to-Spend
+    # 5. Liquidity & Capital Savings (Protected)
     liquid_cash = balances['Intesa'] + balances['Trade Republic'] + balances['Budget Settimana'] + balances['ISY']
-    safe_to_spend = liquid_cash - total_pending_fixed
 
-    # Dynamic Daily Allowance (Row 85: Safe Cash / Days remaining to paycheck)
-    days_left = max(1, cycle['days_remaining'])
-    dynamic_daily_allowance = safe_to_spend / days_left
+    # 6. Detect Current Salary from Paycheck Cycle or fallback
+    current_salary = MONTHLY_NET_SALARY
+    for r in chronological_rows:
+        if r['Type'] == 'Income':
+            amt = float(r['Amount']) if r['Amount'] else 0.0
+            if amt >= 1000.0:
+                try:
+                    dt = datetime.strptime(r['Time'][:19], '%Y-%m-%d %H:%M:%S')
+                    if cycle_start_dt - timedelta(days=4) <= dt <= cycle_end_dt:
+                        current_salary = amt
+                except Exception:
+                    pass
 
-    # 6. The 3 Lines of Costs (Rows 67, 68, 69)
-    # Row 67 (Ideale): Linear cumulative allowance (t * daily_budget)
-    cycle_daily_rate = MONTHLY_VARIABLE_BUDGET / cycle['total_days']
+    total_monthly_fixed = sum(b['amount'] for b in RECURRING_BILLS)
+    monthly_var_budget = max(0.0, current_salary - total_monthly_fixed)
+
+    # 7. The 3 Lines of Costs (Paycheck Pacing)
+    cycle_daily_rate = monthly_var_budget / cycle['total_days']
     ideale_to_date = cycle['days_elapsed'] * cycle_daily_rate
-
-    # Row 68 (Pivot): Actual cumulative variable spend to date (excluding one-off travel)
     pivot_to_date = sum(e['amt'] for e in cycle_var_paid if not e['is_travel'])
-
-    # Row 69 (DIFFerenza): Cushion (+) vs Deficit (-)
     differenza_to_date = ideale_to_date - pivot_to_date
-
-    # Media Reale (Cell I31): Normalized daily burn
     media_reale_daily = pivot_to_date / max(1, cycle['days_elapsed'])
 
-    # Intesa Check
+    # Paycheck-based safe-to-spend & runway (Preserves accumulated savings)
+    remaining_paycheck_budget = max(0.0, monthly_var_budget - pivot_to_date)
+    days_left = max(1, cycle['days_remaining'])
+    dynamic_daily_allowance = remaining_paycheck_budget / days_left
+
+    # Intesa Direct Debit Check
     intesa_pending = sum(b['amount'] for b in pending_bills if b['account'] == 'Intesa')
     intesa_shortfall = max(0.0, intesa_pending - balances['Intesa'])
 
-    # 7. Stock Portfolio Live Stats
+    # 8. Stock Portfolio Live Stats
     portfolio_cost = sum(s['cost'] for s in ACTIVE_STOCK_HOLDINGS)
     portfolio_val = sum(s['shares'] * s['price'] for s in ACTIVE_STOCK_HOLDINGS)
     unrealized_pnl = portfolio_val - portfolio_cost
@@ -277,8 +284,12 @@ def analyze_financials(csv_path):
         "cycle": cycle,
         "balances": balances,
         "liquid_cash": liquid_cash,
+        "current_salary": current_salary,
+        "total_monthly_fixed": total_monthly_fixed,
+        "monthly_var_budget": monthly_var_budget,
+        "remaining_paycheck_budget": remaining_paycheck_budget,
         "total_pending_fixed": total_pending_fixed,
-        "safe_to_spend": safe_to_spend,
+        "safe_to_spend": remaining_paycheck_budget,
         "dynamic_daily_allowance": dynamic_daily_allowance,
         "ideale_to_date": ideale_to_date,
         "pivot_to_date": pivot_to_date,
@@ -356,42 +367,50 @@ def print_paycheck_dashboard(data):
     print(f"📅 Paycheck Cycle: {c['start'].strftime('%d %b')} → {c['end'].strftime('%d %b %Y')} (Day {c['days_elapsed']} of {c['total_days']} • {c['days_remaining']} days left)")
     print("=" * 72)
 
-    print("\n🎯 1. THE 3 LINES OF COSTS (EXCEL ROWS 67, 68, 69 PACING)")
-    print(f"   • Row 67 (Spese Ideale):    €{data['ideale_to_date']:7.2f} (Cumulative linear allowance to Day {c['days_elapsed']})")
+    print("\n💵 1. MONTHLY PAYCHECK CASH FLOW BREAKDOWN")
+    print(f"   • Monthly Net Paycheck:     €{data['current_salary']:7.2f}")
+    print(f"   • Obligatory Fixed Bills:  -€{data['total_monthly_fixed']:7.2f} (Rent, Car loan, Utilities, subs)")
+    print("   -----------------------------------------------------")
+    print(f"   • Variable Spending Cap:    €{data['monthly_var_budget']:7.2f} (Pacing: €{data['monthly_var_budget']/c['total_days']:.2f}/day)")
+
+    print("\n🎯 2. THE 3 LINES OF COSTS (PACING WITHIN PAYCHECK)")
+    print(f"   • Row 67 (Spese Ideale):    €{data['ideale_to_date']:7.2f} (Cumulative linear pace to Day {c['days_elapsed']})")
     print(f"   • Row 68 (Spese Pivot):     €{data['pivot_to_date']:7.2f} (Actual variable burn to date, excl. travel)")
     diff_status = "✅ CUSHION (UNDER BUDGET)" if data['differenza_to_date'] >= 0 else "🚨 DEFICIT (OVER BUDGET)"
     sign = "+" if data['differenza_to_date'] >= 0 else ""
     print(f"   • Row 69 (DIFFerenza):     {sign}€{data['differenza_to_date']:7.2f} [{diff_status}]")
-    print(f"   👉 Media Reale Daily Burn:  €{data['media_reale_daily']:7.2f} / day (Excel cell I31)")
+    print(f"   👉 Media Reale Daily Burn:  €{data['media_reale_daily']:7.2f} / day")
 
-    print("\n💰 2. REAL LIQUIDITY & DYNAMIC DAILY RUNWAY (ROW 85)")
-    print(f"   Liquid Bank Balance:        €{data['liquid_cash']:7.2f} (TR + Intesa + Budget Sett. + ISY)")
-    print(f"   - Pending Fixed Bills:      €{data['total_pending_fixed']:7.2f} (Due before next paycheck)")
+    print("\n💰 3. REMAINING PAYCHECK RUNWAY (PRESERVING SAVINGS)")
+    print(f"   Variable Cap for Cycle:     €{data['monthly_var_budget']:7.2f}")
+    print(f"   - Variable Spend to Date:  -€{data['pivot_to_date']:7.2f}")
     print("   -----------------------------------------------------")
-    print(f"   Safe-to-Spend Cash:         €{data['safe_to_spend']:7.2f}")
-    print(f"   👉 DYNAMIC DAILY BUDGET:    €{data['dynamic_daily_allowance']:7.2f} / day for remaining {c['days_remaining']} days (Row 85)")
+    print(f"   Remaining Paycheck Budget:  €{data['remaining_paycheck_budget']:7.2f}")
+    print(f"   👉 DYNAMIC DAILY RUNWAY:    €{data['dynamic_daily_allowance']:7.2f} / day for remaining {c['days_remaining']} days")
+    print(f"   🛡️ Protected Total Savings: €{data['liquid_cash']:7.2f} (Untouched capital across all banks)")
 
     if data['intesa_shortfall'] > 0:
-        print("\n⚠️ 3. DIRECT DEBIT ALERT (INTESA ACCOUNT)")
+        print("\n⚠️ 4. DIRECT DEBIT ALERT (INTESA ACCOUNT)")
         print(f"   Intesa Balance:             €{data['balances']['Intesa']:7.2f}")
         print(f"   Intesa Pending Bills:       €{data['intesa_pending']:7.2f}")
         print(f"   🚨 SHORTFALL:               €{data['intesa_shortfall']:7.2f}")
         print(f"   👉 ACTION: Transfer at least €{data['intesa_shortfall'] + 30:.2f} from Trade Republic before bills debit!")
 
-    print("\n📅 4. UPCOMING BILLS TIMELINE (NEXT DAYS)")
+    print("\n📅 5. UPCOMING BILLS TIMELINE (NEXT DAYS)")
     for b in data['pending_bills'][:6]:
         due_str = f"In {b['days_until']} days" if b['days_until'] > 1 else ("Tomorrow" if b['days_until'] == 1 else "Today")
         print(f"   • {b['day']:02d} Nov ({due_str:<10}): €{b['amount']:6.2f} | {b['name']:<24} (from {b['account']})")
 
-    print("\n📊 5. WEEKLY ROLLUP MATRIX (EXCEL ROWS 88-114)")
+    print("\n📊 6. WEEKLY ROLLUP MATRIX (EXCEL ROWS 88-114)")
     for w in sorted(data['weekly_breakdown'].keys()):
         tot = sum(data['weekly_breakdown'][w].values())
         print(f"   • Week {w}: €{tot:7.2f} total")
 
-    print("\n📈 6. TRADE REPUBLIC STOCKS (PIPELINE ROADMAP SUMMARY)")
+    print("\n📈 7. TRADE REPUBLIC STOCKS (PIPELINE ROADMAP SUMMARY)")
     print(f"   • Banked Cash Gains:       +€{data['banked_gain']:7.2f} (Closed trades PnL + cash dividends)")
     print(f"   • Active Portfolio Value:   €{data['portfolio_val']:7.2f} (Cost basis: €{data['portfolio_cost']:.2f})")
     print(f"   • Unrealized Open P&L:      €{data['unrealized_pnl']:+7.2f} (Holding 4 active assets)")
+    print("=" * 72)
     print("=" * 72)
 
 if __name__ == '__main__':

@@ -193,7 +193,32 @@ def get_financial_status():
     liquid_keys = ["Intesa", "ISY", "Trade Republic", "Budget Settimana"]
     liquid_cash = sum(balances.get(k, 0.0) for k in liquid_keys)
 
-    # 2. Variable spend in cycle
+    # 2. Fetch real salary of this cycle
+    sal_query = f"""
+        SELECT amount/100 as amt 
+        FROM transaction 
+        WHERE uid = {USER_UID} 
+          AND type = 2 
+          AND amount >= 100000 
+          AND transaction_time >= {start_ts_ms - (4 * 24 * 60 * 60 * 1000)}
+        ORDER BY transaction_time DESC 
+        LIMIT 1;
+    """
+    sal_res = run_query(sal_query)
+    current_salary = float(sal_res[0]["amt"]) if sal_res else 1736.00
+
+    # Total recurring fixed expenses for a month
+    total_monthly_fixed = sum(b["amount"] for b in RECURRING_BILLS)
+
+    # Discretionary variable budget from salary
+    monthly_var_budget = max(0.0, current_salary - total_monthly_fixed)
+
+    # Daily ideal rate based strictly on paycheck
+    daily_budget = monthly_var_budget / cycle["total_days"]
+    ideale_to_date = cycle["days_elapsed"] * daily_budget
+    weekly_budget = monthly_var_budget / (cycle["total_days"] / 7.0)
+
+    # 3. Variable spend in cycle
     txs = run_query(f"""
         SELECT c.name as category, t.amount 
         FROM transaction t 
@@ -212,7 +237,7 @@ def get_financial_status():
         if cat not in FIXED_AND_TRAVEL_CATEGORIES:
             variable_spend += amt
 
-    # 3. Pending bills before next paycheck
+    # 4. Pending bills before next paycheck
     pending_bills = []
     total_pending_bills = 0.0
     intesa_pending = 0.0
@@ -220,7 +245,6 @@ def get_financial_status():
 
     for b in RECURRING_BILLS:
         b_day = b["day"]
-        # Candidate 1: this month
         try:
             d1 = date(today.year, today.month, b_day)
             if today <= d1 < next_payday:
@@ -233,7 +257,6 @@ def get_financial_status():
         except ValueError:
             pass
 
-        # Candidate 2: next month if cycle spans into next month
         try:
             m2 = 1 if today.month == 12 else today.month + 1
             y2 = today.year + 1 if today.month == 12 else today.year
@@ -249,27 +272,33 @@ def get_financial_status():
 
     pending_bills.sort(key=lambda x: x["days_until"])
 
-    # 4. Math Pacing
-    daily_budget = MONTHLY_VARIABLE_BUDGET / cycle["total_days"]
-    ideale_to_date = cycle["days_elapsed"] * daily_budget
+    # 5. Math Pacing & Runway from Paycheck
     differenza = ideale_to_date - variable_spend
-    safe_to_spend = max(0.0, liquid_cash - total_pending_bills)
-    dynamic_runway = safe_to_spend / cycle["days_remaining"]
     media_reale = variable_spend / max(1, cycle["days_elapsed"])
+    remaining_paycheck_budget = monthly_var_budget - variable_spend
+    if cycle["days_remaining"] > 0 and remaining_paycheck_budget > 0:
+        dynamic_runway = remaining_paycheck_budget / cycle["days_remaining"]
+    else:
+        dynamic_runway = 0.0
+
     intesa_shortfall = max(0.0, intesa_pending - balances.get("Intesa", 0.0))
 
     return {
         "today": today,
         "cycle": cycle,
+        "current_salary": current_salary,
+        "total_monthly_fixed": total_monthly_fixed,
+        "monthly_var_budget": monthly_var_budget,
         "daily_budget": daily_budget,
+        "weekly_budget": weekly_budget,
         "balances": balances,
         "liquid_cash": liquid_cash,
         "variable_spend": variable_spend,
         "ideale_to_date": ideale_to_date,
         "differenza": differenza,
+        "remaining_paycheck_budget": remaining_paycheck_budget,
         "total_pending_bills": total_pending_bills,
         "pending_bills": pending_bills,
-        "safe_to_spend": safe_to_spend,
         "dynamic_runway": dynamic_runway,
         "media_reale": media_reale,
         "intesa_pending": intesa_pending,
@@ -280,25 +309,43 @@ def get_financial_status():
 def format_oggi_report(s):
     c = s["cycle"]
     diff_sign = "+" if s["differenza"] >= 0 else ""
-    diff_status = "✅ SOTTO BUDGET (Cuscinetto)" if s["differenza"] >= 0 else "🚨 SOPRA BUDGET (Deficit)"
+    diff_status = "✅ SOTTO BUDGET (Stai risparmiando)" if s["differenza"] >= 0 else "🚨 SOPRA BUDGET (Ritmo elevato)"
 
     msg = [
         f"⚡ <b>BUDGET COACH EZBOOKKEEPING — {s['today'].strftime('%d %b %Y')}</b>",
         f"📅 Ciclo: <b>{c['start'].strftime('%d %b')} → {c['end'].strftime('%d %b')}</b> (Giorno {c['days_elapsed']} di {c['total_days']} · Payday: <b>{c['next_payday'].strftime('%d %b')}</b>, tra {c['days_remaining']} gg)",
         "──────────────────────────────",
-        "🎯 <b>PACING 3-LINES (MODELLO EXCEL)</b>",
-        f"• <b>Ideale (Row 67):</b> €{s['ideale_to_date']:.2f} (tetto consentito)",
-        f"• <b>Pivot (Row 68):</b> €{s['variable_spend']:.2f} (speso effettivo)",
-        f"• <b>DIFFerenza (Row 69):</b> <b>{diff_sign}€{s['differenza']:.2f}</b>",
-        f"👉 <i>{diff_status}</i>",
-        f"• Spesa media reale: <b>€{s['media_reale']:.2f}/giorno</b>",
+        "💵 <b>ANALISI CASH FLOW STIPENDIO</b>",
+        f"• Stipendio Netto Ricevuto: <b>€{s['current_salary']:.2f}</b>",
+        f"• Spese Fisse Obbligatorie: <b>-€{s['total_monthly_fixed']:.2f}</b> (Affitto, Auto, Utenze, ecc.)",
+        f"👉 <b>Budget Variabile Mese: €{s['monthly_var_budget']:.2f}</b> (€{s['daily_budget']:.2f}/gg · €{s['weekly_budget']:.2f}/sett)",
         "",
-        "💰 <b>LIQUIDITÀ & RUNWAY REALE</b>",
-        f"• Saldo Liquido Totale: €{s['liquid_cash']:.2f}",
-        f"• Bollette prima del Payday: €{s['total_pending_bills']:.2f}",
-        f"• Cash Disponibile: €{s['safe_to_spend']:.2f}",
-        f"👉 <b>RUNWAY OGGI: €{s['dynamic_runway']:.2f} / giorno</b> per i restanti {c['days_remaining']} gg",
+        "🎯 <b>PACING SPESE VARIABILI (A OGGI)</b>",
+        f"• <b>Ideale (Row 67):</b> €{s['ideale_to_date']:.2f} (spesa teorica al giorno {c['days_elapsed']})",
+        f"• <b>Pivot (Row 68):</b> €{s['variable_spend']:.2f} (spesa effettiva a oggi · media €{s['media_reale']:.2f}/gg)",
+        f"• <b>DIFFerenza (Row 69): {diff_sign}€{s['differenza']:.2f}</b> [{diff_status}]",
+        "",
+        "🛡️ <b>DISPONIBILITÀ RESIDUA DELLO STIPENDIO</b>",
     ]
+
+    if s["remaining_paycheck_budget"] > 0:
+        msg.extend([
+            f"• Budget Stipendio Rimanente: <b>€{s['remaining_paycheck_budget']:.2f}</b>",
+            f"👉 <b>RUNWAY: €{s['dynamic_runway']:.2f} / giorno</b> per i restanti {c['days_remaining']} gg",
+            f"<i>(Rispettando €{s['dynamic_runway']:.2f}/gg arrivi al {c['next_payday'].strftime('%d %b')} senza toccare 1€ di risparmi!)</i>"
+        ])
+    else:
+        over = abs(s["remaining_paycheck_budget"])
+        msg.extend([
+            f"🚨 <b>BUDGET STIPENDIO ESAURITO: -€{over:.2f} fuori soglia!</b>",
+            "👉 <b>RUNWAY CONSIGLIATO: €0.00 / giorno</b>",
+            f"⚠️ <i>Attenzione: ogni spesa ulteriore da oggi al {c['next_payday'].strftime('%d %b')} intaccherà i risparmi accumulati!</i>"
+        ])
+
+    msg.extend([
+        "",
+        f"🏦 <b>Patrimonio & Risparmi Protetti:</b> €{s['liquid_cash']:.2f} (TR, ISY, Contanti)"
+    ])
 
     if s["intesa_shortfall"] > 0:
         msg.extend([
@@ -307,7 +354,7 @@ def format_oggi_report(s):
             f"• Saldo Intesa: €{s['balances'].get('Intesa', 0.0):.2f}",
             f"• Bollette in arrivo su Intesa: €{s['intesa_pending']:.2f}",
             f"• <b>Scoperto previsto: €{s['intesa_shortfall']:.2f}</b>",
-            f"👉 <i>Azione: Trasferisci almeno <b>€{s['intesa_shortfall'] + 20:.2f}</b> da Trade Republic a Intesa!</i>"
+            f"👉 <i>Azione: Trasferisci almeno <b>€{s['intesa_shortfall'] + 20:.2f}</b> da Trade Republic a Intesa prima del 20 Nov!</i>"
         ])
 
     return "\n".join(msg)

@@ -45,7 +45,7 @@
                         <span class="text-caption text-medium-emphasis d-block">{{ tt('Liquid Bank Balance') }}</span>
                         <span class="text-h6 font-weight-bold">{{ displayLiquidCash }}</span>
                         <div class="text-caption text-disabled mt-1">
-                            {{ tt('Checking + Savings + TR Cash') }}
+                            {{ tt('Protected Lifetime Savings') }}
                         </div>
                     </v-card>
                 </v-col>
@@ -61,11 +61,22 @@
                 </v-col>
 
                 <v-col cols="12" sm="6" md="3">
-                    <v-card variant="tonal" color="primary" class="pa-3 rounded-lg h-100">
-                        <span class="text-caption font-weight-bold text-uppercase d-block">{{ tt('Safe-to-Spend Cash') }}</span>
-                        <span class="text-h6 font-weight-bold">{{ displaySafeToSpend }}</span>
+                    <v-card
+                        variant="tonal"
+                        :color="remainingPaycheckVariableBudget >= 0 ? 'primary' : 'error'"
+                        class="pa-3 rounded-lg h-100"
+                    >
+                        <span class="text-caption font-weight-bold text-uppercase d-block">{{ tt('Paycheck Variable Budget Left') }}</span>
+                        <span class="text-h6 font-weight-bold" :class="remainingPaycheckVariableBudget >= 0 ? '' : 'text-error'">
+                            {{ displayRemainingPaycheckBudget }}
+                        </span>
                         <div class="text-caption mt-1 font-weight-medium">
-                            {{ formatCurrency(dynamicDailyAllowance) }}/{{ tt('day') }} ({{ daysLeftInCycle }} {{ tt('days left') }})
+                            <span v-if="remainingPaycheckVariableBudget > 0">
+                                {{ formatCurrency(dynamicDailyAllowance) }}/{{ tt('day') }} ({{ daysLeftInCycle }} {{ tt('days left') }})
+                            </span>
+                            <span v-else class="text-error font-weight-bold">
+                                {{ tt('Budget Exceeded') }} · 0 {{ tt('EUR') }}/{{ tt('day') }}
+                            </span>
                         </div>
                     </v-card>
                 </v-col>
@@ -335,7 +346,6 @@
 import { ref, computed } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
-import { useSettingsStore } from '@/stores/setting.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useAccountsStore } from '@/stores/account.ts';
 import { useOverviewStore } from '@/stores/overview.ts';
@@ -358,7 +368,6 @@ defineProps<{
 
 const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 
-const settingsStore = useSettingsStore();
 const userStore = useUserStore();
 const accountsStore = useAccountsStore();
 const overviewStore = useOverviewStore();
@@ -482,14 +491,30 @@ const totalPendingFixed = computed<number>(() => {
     return pendingBills.value.reduce((sum, b) => sum + b.amountCents, 0);
 });
 
-const safeToSpend = computed<number>(() => {
-    return Math.max(0, liquidCash.value - totalPendingFixed.value);
+// Financial Cash Flow Model: Paycheck Income - Fixed Bills
+const currentCycleSalary = computed<number>(() => 173600); // 1,736.00 EUR base salary
+
+const totalMonthlyFixedBills = computed<number>(() => {
+    return STATIC_MONTHLY_BILLS.reduce((sum, b) => sum + b.amountCents, 0);
 });
 
-// Dynamic Daily Allowance (Row 85: Safe Cash / Days Left)
+// Discretionary variable budget from salary: e.g. 1736.00 - 1081.07 = 654.93 EUR
+const monthlyVariableBudget = computed<number>(() => {
+    return Math.max(0, currentCycleSalary.value - totalMonthlyFixedBills.value);
+});
+
+const spentAmountMTD = computed<number>(() => overviewStore.variableExpenseThisMonth?.expenseAmount || 0);
+const currentPivotCents = computed(() => spentAmountMTD.value);
+
+// Dynamic Daily Allowance (Row 85: strictly from remaining paycheck variable budget)
+const remainingPaycheckVariableBudget = computed<number>(() => {
+    return monthlyVariableBudget.value - currentPivotCents.value;
+});
+
 const dynamicDailyAllowance = computed<number>(() => {
     const days = daysLeftInCycle.value;
-    return days > 0 ? Math.round(safeToSpend.value / days) : safeToSpend.value;
+    if (days <= 0 || remainingPaycheckVariableBudget.value <= 0) return 0;
+    return Math.round(remainingPaycheckVariableBudget.value / days);
 });
 
 // Intesa specific analysis
@@ -512,7 +537,7 @@ function formatCurrency(cents: number): string {
 
 const displayLiquidCash = computed(() => formatCurrency(liquidCash.value));
 const displayPendingFixed = computed(() => formatCurrency(totalPendingFixed.value));
-const displaySafeToSpend = computed(() => formatCurrency(safeToSpend.value));
+const displayRemainingPaycheckBudget = computed(() => formatCurrency(remainingPaycheckVariableBudget.value));
 const displayIntesaBalance = computed(() => formatCurrency(intesaBalance.value));
 
 function getDaysUntilText(daysUntil: number, day: number): string {
@@ -522,11 +547,8 @@ function getDaysUntilText(daysUntil: number, day: number): string {
 }
 
 // What-If Simulator computations
-const monthlyVariableBudget = computed<number>(() => settingsStore.appSettings.monthlyVariableBudgetInHomePage || 72500);
-const spentAmountMTD = computed<number>(() => overviewStore.variableExpenseThisMonth?.expenseAmount || 0);
-
 const baseRemainingBudget = computed<number>(() =>
-    Math.max(0, monthlyVariableBudget.value - spentAmountMTD.value)
+    Math.max(0, remainingPaycheckVariableBudget.value)
 );
 
 const simulatedRemainingBudget = computed<number>(() => {
@@ -534,9 +556,7 @@ const simulatedRemainingBudget = computed<number>(() => {
     return Math.max(0, baseRemainingBudget.value - extraCents);
 });
 
-const baseDailyAllowance = computed<number>(() =>
-    daysLeftInCycle.value > 0 ? Math.round(baseRemainingBudget.value / daysLeftInCycle.value) : 0
-);
+const baseDailyAllowance = computed<number>(() => dynamicDailyAllowance.value);
 
 const simulatedNewDailyAllowance = computed<number>(() =>
     daysLeftInCycle.value > 0 ? Math.round(simulatedRemainingBudget.value / daysLeftInCycle.value) : 0
@@ -550,11 +570,10 @@ const dailyAllowanceDelta = computed<number>(() =>
 // The 3 Lines of Costs (Excel Rows 67, 68, 69) & Prior Month Ghost
 // -------------------------------------------------------------
 const cycleDailyBudget = computed(() => {
-    return totalDaysInCycle.value > 0 ? (monthlyVariableBudget.value / totalDaysInCycle.value) : 2338;
+    return totalDaysInCycle.value > 0 ? (monthlyVariableBudget.value / totalDaysInCycle.value) : 1985;
 });
 
 const currentIdealeCents = computed(() => Math.round(currentCycleDay.value * cycleDailyBudget.value));
-const currentPivotCents = computed(() => spentAmountMTD.value);
 const pacingDifference = computed(() => currentIdealeCents.value - currentPivotCents.value);
 
 const priorMonthPaceCents = computed(() => Math.round(currentIdealeCents.value * 0.94));
