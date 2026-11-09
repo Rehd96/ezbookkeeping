@@ -225,43 +225,154 @@
             </f7-list-item>
         </f7-list>
 
-        <f7-block-title>{{ tt('Cash Flow & Upcoming Obligations') }}</f7-block-title>
+        <f7-block-title class="margin-top">{{ tt('Cash Flow & Upcoming Obligations') }}</f7-block-title>
         <f7-card class="cashflow-mobile-card">
             <f7-card-content>
                 <div v-if="mobileIntesaShortfall > 0" class="shortfall-alert-box margin-bottom-half">
-                    <span class="text-color-red font-weight-bold">⚠️ {{ tt('Intesa Shortfall') }}: {{ fmt(mobileIntesaShortfall) }}</span>
-                    <small class="display-block text-color-red">{{ tt('Transfer from TR before 20th') }}</small>
+                    <div class="display-flex align-items-center">
+                        <f7-icon f7="exclamationmark_triangle_fill" color="red" class="margin-inline-end-half"></f7-icon>
+                        <span class="text-color-red font-weight-bold">{{ tt('Intesa Shortfall') }}: {{ fmt(mobileIntesaShortfall) }}</span>
+                    </div>
+                    <small class="display-block text-color-red margin-top-quarter">
+                        {{ tt('Transfer from TR before') }} {{ mobileIntesaNextBillDateText }}
+                    </small>
                 </div>
-                <div class="display-flex justify-content-space-between align-items-center margin-bottom-half">
+                <div class="display-flex justify-content-space-between align-items-baseline margin-bottom-half">
                     <div>
-                        <small class="text-color-gray">{{ tt('Safe-to-Spend Cash') }}</small>
-                        <div class="text-size-large font-weight-bold text-color-primary">{{ fmt(mobileSafeToSpend) }}</div>
+                        <small class="text-color-gray">{{ tt('Monthly Budget (Paycheck)') }}</small>
+                        <div class="text-size-large font-weight-bold" :class="mobileRemainingPaycheckBudget < 0 ? 'text-color-red' : 'text-color-primary'">{{ fmt(mobileRemainingPaycheckBudget) }}</div>
+                        <small class="text-color-gray display-block">{{ fmt(mobileDynamicDailyAllowance) }} / {{ tt('day') }} · {{ tt('Fino allo stipendio tra') }} {{ mobileCycleRange.daysRemaining }} {{ tt('giorni') }}</small>
                     </div>
                     <div class="text-align-right">
                         <small class="text-color-gray">{{ tt('Pending Fixed Bills') }}</small>
-                        <div class="font-weight-medium text-color-orange">{{ fmt(mobileTotalPendingFixed) }}</div>
+                        <div class="text-size-large font-weight-bold text-color-orange">{{ fmt(mobileTotalPendingFixed) }}</div>
+                        <small class="text-color-gray display-block">{{ mobilePendingBills.length }} {{ tt('bills due before next paycheck') }}</small>
                     </div>
                 </div>
-                <div class="display-flex justify-content-space-between text-size-small text-color-gray">
+
+                <div class="display-flex justify-content-space-between align-items-baseline margin-top margin-bottom-quarter">
+                    <small class="text-color-gray font-weight-medium">{{ tt('Variable Spending') }} ({{ tt('Cycle Day') }} {{ mobileCycleRange.currentDay }}/{{ mobileCycleRange.totalDays }})</small>
+                    <span class="font-weight-bold text-size-small" :class="mobilePaceTextColorClass">{{ fmt(mobileCurrentPivotCents) }} / {{ fmt(mobilePaycheckVariableBudget) }}</span>
+                </div>
+                <f7-progressbar class="budget-bar margin-bottom-quarter" :progress="mobilePaceProgress" :color="mobilePaceBarColor"></f7-progressbar>
+                <small class="display-block margin-bottom-half" :class="mobilePaceTextColorClass">{{ mobilePivotDiffText }}</small>
+
+                <div class="display-flex justify-content-space-between text-size-small text-color-gray border-top padding-top-half">
                     <span>{{ tt('Liquid Bank Balance') }}: {{ fmt(mobileLiquidCash) }}</span>
                     <span>Intesa: {{ fmt(mobileIntesaBalance) }}</span>
                 </div>
             </f7-card-content>
         </f7-card>
 
-        <f7-list strong inset dividers class="upcoming-bills-mobile-list" v-if="mobilePendingBills.length">
+        <f7-block class="no-margin-top margin-bottom-half">
+            <f7-segmented strong round>
+                <f7-button round :text="tt('Upcoming Bills')" :active="mobileCashflowTab === 'bills'" @click="mobileCashflowTab = 'bills'"></f7-button>
+                <f7-button round :text="tt('Cycle Pacing')" :active="mobileCashflowTab === 'pacing'" @click="mobileCashflowTab = 'pacing'"></f7-button>
+                <f7-button round :text="tt('What-If Simulator')" :active="mobileCashflowTab === 'whatif'" @click="mobileCashflowTab = 'whatif'"></f7-button>
+            </f7-segmented>
+        </f7-block>
+
+        <f7-list strong inset dividers class="upcoming-bills-mobile-list no-margin-top" v-if="mobileCashflowTab === 'bills' && mobilePendingBills.length">
             <f7-list-item
                 v-for="b in mobilePendingBills"
                 :key="b.name + b.day"
                 :title="b.name"
-                :subtitle="`${b.day} Nov (${getMobileDaysUntilText(b.daysUntil)}) · ${b.account}`"
+                :subtitle="`${b.day} ${b.dueDate.toLocaleString('default', { month: 'short' })} (${getMobileDaysUntilText(b.daysUntil)}) · ${b.account}`"
                 :after="fmt(b.amountCents)"
             >
                 <template #media>
-                    <f7-icon :f7="b.account === 'Intesa' && mobileIntesaShortfall > 0 ? 'exclamationmark_circle' : 'calendar'"></f7-icon>
+                    <f7-icon :f7="b.account === 'Intesa' && mobileIntesaShortfall > 0 ? 'exclamationmark_circle_fill' : 'calendar'"
+                             :color="b.account === 'Intesa' && mobileIntesaShortfall > 0 ? 'red' : 'primary'"></f7-icon>
                 </template>
             </f7-list-item>
         </f7-list>
+
+        <f7-block strong inset class="text-align-center text-color-gray no-margin-top" v-else-if="mobileCashflowTab === 'bills' && !mobilePendingBills.length">
+            <f7-icon f7="checkmark_seal_fill" color="green" size="32"></f7-icon>
+            <p class="margin-top-half no-margin-bottom">{{ tt('All fixed bills for this cycle are paid') }}</p>
+        </f7-block>
+
+        <f7-list strong inset dividers class="pacing-mobile-list no-margin-top" v-else-if="mobileCashflowTab === 'pacing'">
+            <f7-list-item :title="tt('Cycle Day')">
+                <template #after>
+                    <span>{{ mobileCycleRange.currentDay }} / {{ mobileCycleRange.totalDays }}</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Next Payday')">
+                <template #after>
+                    <span>{{ mobileNextPaydayFormatted }} ({{ tt('In') }} {{ mobileCycleRange.daysRemaining }} {{ tt('days') }})</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Detected Salary')">
+                <template #after>
+                    <span class="text-color-green font-weight-bold">{{ fmt(mobileCycleSalary) }}</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Total Fixed Bills')">
+                <template #after>
+                    <span class="text-color-orange">-{{ fmt(mobileTotalMonthlyFixedBills) }}</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Initial Variable Budget')">
+                <template #after>
+                    <span class="font-weight-bold">{{ fmt(mobilePaycheckVariableBudget) }}</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Actual Spend to Date')">
+                <template #after>
+                    <span :class="mobilePaceTextColorClass" class="font-weight-bold">{{ fmt(mobileCurrentPivotCents) }}</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Ideal Spend to Date')">
+                <template #after>
+                    <span>{{ fmt(mobileIdealSpendToDate) }}</span>
+                </template>
+            </f7-list-item>
+            <f7-list-item :title="tt('Pacing Difference')">
+                <template #after>
+                    <span :class="mobilePaceTextColorClass" class="font-weight-bold">{{ mobilePivotDiffText }}</span>
+                </template>
+            </f7-list-item>
+        </f7-list>
+
+        <f7-card class="whatif-mobile-card no-margin-top" v-else-if="mobileCashflowTab === 'whatif'">
+            <f7-card-content>
+                <div class="font-weight-bold margin-bottom-quarter">{{ tt('Simulate an Unplanned Expense Today') }}</div>
+                <small class="display-block text-color-gray margin-bottom">
+                    {{ tt('Slide or tap an amount to see how it affects your remaining daily budget for the rest of the paycheck cycle without doing any mental math.') }}
+                </small>
+
+                <div class="whatif-buttons margin-bottom">
+                    <f7-button small round outline @click="mobileSimulatedSpendAmount += 20">+€20</f7-button>
+                    <f7-button small round outline @click="mobileSimulatedSpendAmount += 50">+€50</f7-button>
+                    <f7-button small round outline @click="mobileSimulatedSpendAmount += 100">+€100</f7-button>
+                    <f7-button small round outline color="red" @click="mobileSimulatedSpendAmount = 0">{{ tt('Reset') }}</f7-button>
+                </div>
+
+                <div class="whatif-result-box">
+                    <div class="display-flex justify-content-space-between align-items-center margin-bottom-half">
+                        <span class="text-size-small text-color-gray">{{ tt('Simulated Expense') }}</span>
+                        <span class="font-weight-bold text-size-large">€{{ mobileSimulatedSpendAmount }}</span>
+                    </div>
+                    <div class="display-flex justify-content-space-between align-items-center margin-bottom-half">
+                        <span class="text-size-small text-color-gray">{{ tt('Simulated Remaining Variable Budget') }}</span>
+                        <span class="font-weight-bold" :class="mobileSimulatedRemainingBudget <= 0 ? 'text-color-red' : ''">{{ fmt(mobileSimulatedRemainingBudget) }}</span>
+                    </div>
+                    <div class="border-top padding-top-half display-flex justify-content-space-between align-items-baseline">
+                        <span class="text-size-small text-color-gray">{{ tt('New Daily Allowance (Rest of Month)') }}</span>
+                        <div class="text-align-right">
+                            <span class="font-weight-bold text-size-large" :class="mobileSimulatedNewDailyAllowance < 1000 ? 'text-color-red' : 'text-color-primary'">
+                                {{ fmt(mobileSimulatedNewDailyAllowance) }}
+                            </span>
+                            <small class="text-color-gray"> / {{ tt('day') }}</small>
+                        </div>
+                    </div>
+                    <small v-if="mobileSimulatedSpendAmount > 0" class="display-block text-align-right text-color-red margin-top-quarter">
+                        (-{{ fmt(mobileDailyAllowanceDelta) }}/{{ tt('day') }} {{ tt('For') }} {{ mobileCycleRange.daysRemaining }} {{ tt('remaining days until next paycheck') }})
+                    </small>
+                </div>
+            </f7-card-content>
+        </f7-card>
 
         <f7-block-title>{{ tt('Trade Republic Yield & Investments') }}</f7-block-title>
         <f7-card class="investments-mobile-card">
@@ -289,15 +400,18 @@
 
         <f7-block-title v-if="weeklySpendingRows.length || loading">{{ tt('Weekly Spending Breakdown') }}</f7-block-title>
         <f7-list strong inset dividers class="weekly-spending-list" :class="{ 'skeleton-text': loading }" v-if="weeklySpendingRows.length || loading">
-            <f7-list-item v-if="loading" v-for="n in 4" :key="n" title="Loading..." after="..."></f7-list-item>
-            <f7-list-item
-                v-else
-                v-for="row in weeklySpendingRows"
-                :key="row.categoryId"
-                :link="`/transaction/list?categoryIds=${row.categoryId}&dateType=${DateRange.ThisWeek.type}`"
-                :title="row.categoryName"
-                :after="getDisplayWeeklyAmount(row.weekAmount, row.incomplete)"
-            ></f7-list-item>
+            <template v-if="loading">
+                <f7-list-item v-for="n in 4" :key="n" title="Loading..." after="..."></f7-list-item>
+            </template>
+            <template v-else>
+                <f7-list-item
+                    v-for="row in weeklySpendingRows"
+                    :key="row.categoryId"
+                    :link="`/transaction/list?categoryIds=${row.categoryId}&dateType=${DateRange.ThisWeek.type}`"
+                    :title="row.categoryName"
+                    :after="getDisplayWeeklyAmount(row.weekAmount, row.incomplete)"
+                ></f7-list-item>
+            </template>
             <f7-list-item v-if="!loading && weeklySpendingRows.length" :title="tt('Total')" :after="getDisplayWeeklyAmount(weeklySpendingTotal)"></f7-list-item>
         </f7-list>
 
@@ -380,6 +494,18 @@ import { isNumber } from '@/lib/common.ts';
 import { isUserLogined, isUserUnlocked } from '@/lib/userstate.ts';
 import { getShareCacheImageBlob } from '@/lib/cache.ts';
 import { isTransactionFromAIImageRecognitionEnabled } from '@/lib/server_settings.ts';
+import services from '@/lib/services.ts';
+import type { TransactionInfoResponse } from '@/models/transaction.ts';
+import {
+    type PendingBill,
+    type CycleRange,
+    STATIC_MONTHLY_BILLS,
+    computeCycle,
+    getPaidBillsInCycle,
+    getPendingBills,
+    getCycleSalary,
+    getCycleDailyVariableSpending
+} from '@/lib/cashflow.ts';
 
 type AIImageRecognitionSheetType = InstanceType<typeof AIImageRecognitionSheet>;
 
@@ -577,38 +703,57 @@ function getDisplayWeeklyAmount(amount: number, incomplete?: boolean): string {
 
 // ── Cash Flow & Upcoming Bills (Mobile) ────────────────────────────────────
 
-interface MobileBillDef {
-    day: number;
-    name: string;
-    amountCents: number;
-    account: string;
+const mobileCashflowTab = ref<'bills' | 'pacing' | 'whatif'>('bills');
+const mobileSimulatedSpendAmount = ref<number>(0);
+
+const mobileCycleToday = new Date();
+const mobileCycleRange = computed<CycleRange>(() => computeCycle(mobileCycleToday));
+const mobilePriorCycleRange = computed<CycleRange>(() => {
+    const dayBeforeStart = new Date(mobileCycleRange.value.start.getTime() - 24 * 60 * 60 * 1000);
+    return computeCycle(dayBeforeStart);
+});
+
+const mobileCycleTransactions = ref<TransactionInfoResponse[]>([]);
+const mobilePriorCycleTransactions = ref<TransactionInfoResponse[]>([]);
+const mobileIsLoadingTransactions = ref<boolean>(false);
+
+async function loadMobileCashFlowTransactions(): Promise<void> {
+    mobileIsLoadingTransactions.value = true;
+    try {
+        const priorStartUnix = Math.floor(mobilePriorCycleRange.value.start.getTime() / 1000);
+        const cycleStartUnix = Math.floor(mobileCycleRange.value.start.getTime() / 1000);
+        const cycleEndUnix = Math.floor(mobileCycleRange.value.nextPayday.getTime() / 1000);
+
+        const response = await services.getAllTransactions({
+            startTime: priorStartUnix,
+            endTime: cycleEndUnix,
+            withPictures: false
+        });
+
+        if (response.data && response.data.result) {
+            const all = response.data.result;
+            mobileCycleTransactions.value = all.filter(t => t.time >= cycleStartUnix);
+            mobilePriorCycleTransactions.value = all.filter(t => t.time >= priorStartUnix && t.time < cycleStartUnix);
+        }
+    } catch (e) {
+        console.error('Failed to load mobile cash flow transactions', e);
+    } finally {
+        mobileIsLoadingTransactions.value = false;
+    }
 }
 
-const STATIC_MOBILE_BILLS: MobileBillDef[] = [
-    { day: 1,  name: 'Canone Conto Intesa',   amountCents: 700,    account: 'Intesa' },
-    { day: 2,  name: 'Affitto (Rent)',         amountCents: 50000,  account: 'Budget Settimana' },
-    { day: 5,  name: 'Finanziamento PC',       amountCents: 3673,   account: 'Intesa' },
-    { day: 5,  name: 'IONOS Spazio Web',       amountCents: 1098,   account: 'Budget Settimana' },
-    { day: 8,  name: 'Fibra Casa (Internet)',  amountCents: 2979,   account: 'Intesa' },
-    { day: 8,  name: 'Amazon Prime Ad-Free',   amountCents: 199,    account: 'Budget Settimana' },
-    { day: 15, name: 'Tariffa Mobile (TIM)',   amountCents: 799,    account: 'Intesa' },
-    { day: 16, name: 'Amazon Prime',           amountCents: 499,    account: 'Budget Settimana' },
-    { day: 16, name: 'PAC Trade Investiti',    amountCents: 5000,   account: 'Trade Republic' },
-    { day: 20, name: 'Rata Auto',              amountCents: 30450,  account: 'Intesa' },
-    { day: 21, name: 'Utenze (Luce & Gas)',    amountCents: 11734,  account: 'Intesa' },
-    { day: 30, name: 'IONOS VPS',              amountCents: 976,    account: 'Budget Settimana' }
-];
+// Paid bills detection in current cycle
+const mobilePaidBillsInCycle = computed(() => {
+    return getPaidBillsInCycle(
+        mobileCycleTransactions.value,
+        settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage,
+        transactionCategoriesStore.allTransactionCategoriesMap
+    );
+});
 
-const mobileCurrentDay = new Date().getDate();
-
-const mobilePendingBills = computed(() => {
-    return STATIC_MOBILE_BILLS
-        .filter(b => b.day >= mobileCurrentDay)
-        .map(b => ({
-            ...b,
-            daysUntil: b.day - mobileCurrentDay
-        }))
-        .sort((a, b) => a.day - b.day);
+// Pending bills for current cycle
+const mobilePendingBills = computed<PendingBill[]>(() => {
+    return getPendingBills(mobilePaidBillsInCycle.value, mobileCycleRange.value.nextPayday, mobileCycleToday);
 });
 
 function getMobileDaysUntilText(daysUntil: number): string {
@@ -631,9 +776,83 @@ const mobileTotalPendingFixed = computed<number>(() =>
     mobilePendingBills.value.reduce((sum, b) => sum + b.amountCents, 0)
 );
 
-const mobileSafeToSpend = computed<number>(() =>
-    Math.max(0, mobileLiquidCash.value - mobileTotalPendingFixed.value)
-);
+const mobileCycleSalary = computed<number>(() => {
+    return getCycleSalary(mobileCycleTransactions.value, mobilePriorCycleTransactions.value, mobileCycleRange.value.start);
+});
+
+const mobileTotalMonthlyFixedBills = computed<number>(() => {
+    return STATIC_MONTHLY_BILLS.reduce((sum, b) => sum + b.amountCents, 0);
+});
+
+const mobilePaycheckVariableBudget = computed<number>(() => {
+    return Math.max(0, mobileCycleSalary.value - mobileTotalMonthlyFixedBills.value);
+});
+
+const mobileDailyVariableSpending = computed(() => {
+    return getCycleDailyVariableSpending(
+        mobileCycleTransactions.value,
+        mobileCycleRange.value,
+        settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage,
+        transactionCategoriesStore.allTransactionCategoriesMap
+    );
+});
+
+const mobileCurrentPivotCents = computed<number>(() => {
+    const curDay = mobileCycleRange.value.currentDay;
+    const { cumulativeSpend } = mobileDailyVariableSpending.value;
+    return cumulativeSpend[curDay] ?? 0;
+});
+
+const mobileRemainingPaycheckBudget = computed<number>(() => {
+    return mobilePaycheckVariableBudget.value - mobileCurrentPivotCents.value;
+});
+
+const mobileDynamicDailyAllowance = computed<number>(() => {
+    const days = mobileCycleRange.value.daysRemaining;
+    if (days <= 0 || mobileRemainingPaycheckBudget.value <= 0) return 0;
+    return Math.round(mobileRemainingPaycheckBudget.value / days);
+});
+
+const mobileIdealSpendToDate = computed<number>(() => {
+    const totalDays = mobileCycleRange.value.totalDays;
+    const curDay = mobileCycleRange.value.currentDay;
+    if (totalDays <= 0) return 0;
+    return Math.round(mobilePaycheckVariableBudget.value * (curDay / totalDays));
+});
+
+const mobilePivotDifference = computed<number>(() => {
+    return mobileIdealSpendToDate.value - mobileCurrentPivotCents.value;
+});
+
+const mobilePivotDiffText = computed<string>(() => {
+    const diff = mobilePivotDifference.value;
+    if (diff >= 0) {
+        return `+${fmt(diff)} ${tt('under ideal pace')} (${fmt(mobileIdealSpendToDate.value)})`;
+    }
+    return `-${fmt(Math.abs(diff))} ${tt('over ideal pace')} (${fmt(mobileIdealSpendToDate.value)})`;
+});
+
+const mobilePaceProgress = computed<number>(() => {
+    if (mobilePaycheckVariableBudget.value <= 0) return 0;
+    return Math.min(100, Math.round((mobileCurrentPivotCents.value / mobilePaycheckVariableBudget.value) * 100));
+});
+
+const mobilePaceBarColor = computed<string>(() => {
+    if (mobileCurrentPivotCents.value > mobilePaycheckVariableBudget.value) return 'red';
+    if (mobileCurrentPivotCents.value > mobileIdealSpendToDate.value) return 'orange';
+    return 'green';
+});
+
+const mobilePaceTextColorClass = computed<string>(() => {
+    if (mobileCurrentPivotCents.value > mobilePaycheckVariableBudget.value) return 'text-color-red';
+    if (mobileCurrentPivotCents.value > mobileIdealSpendToDate.value) return 'text-color-orange';
+    return 'text-color-green';
+});
+
+const mobileNextPaydayFormatted = computed<string>(() => {
+    const np = mobileCycleRange.value.nextPayday;
+    return `${np.getDate()} ${np.toLocaleString('default', { month: 'short' })}`;
+});
 
 const mobileIntesaAccount = computed(() =>
     (accountsStore.allPlainAccounts || []).find(acc => acc.name.toLowerCase().includes('intesa'))
@@ -649,6 +868,28 @@ const mobileIntesaPendingTotal = computed<number>(() =>
 const mobileIntesaShortfall = computed<number>(() =>
     Math.max(0, mobileIntesaPendingTotal.value - mobileIntesaBalance.value)
 );
+const mobileIntesaNextBill = computed(() => mobileIntesaPendingBills.value[0]);
+const mobileIntesaNextBillDateText = computed(() => {
+    if (!mobileIntesaNextBill.value) return tt('next debit');
+    return `${mobileIntesaNextBill.value.day} ${mobileIntesaNextBill.value.dueDate.toLocaleString('default', { month: 'short' })}`;
+});
+
+// What-If Simulator for mobile
+const mobileBaseRemainingBudget = computed<number>(() =>
+    Math.max(0, mobileRemainingPaycheckBudget.value)
+);
+const mobileSimulatedRemainingBudget = computed<number>(() => {
+    const extraCents = mobileSimulatedSpendAmount.value * 100;
+    return Math.max(0, mobileBaseRemainingBudget.value - extraCents);
+});
+const mobileSimulatedNewDailyAllowance = computed<number>(() => {
+    const days = mobileCycleRange.value.daysRemaining;
+    if (days <= 0 || mobileSimulatedRemainingBudget.value <= 0) return 0;
+    return Math.round(mobileSimulatedRemainingBudget.value / days);
+});
+const mobileDailyAllowanceDelta = computed<number>(() => {
+    return Math.max(0, mobileDynamicDailyAllowance.value - mobileSimulatedNewDailyAllowance.value);
+});
 
 // Trade Republic & Investment helpers
 const mobileTrAccount = computed(() =>
@@ -704,7 +945,8 @@ function init(): void {
             transactionCategoriesStore.loadAllCategories({ force: false }),
             transactionTemplatesStore.loadAllTemplates({ templateType: TemplateType.Normal.type,  force: false }),
             overviewStore.loadTransactionOverview({ force: false }),
-            overviewStore.loadWeeklyExpenseStatistics({ force: false })
+            overviewStore.loadWeeklyExpenseStatistics({ force: false }),
+            loadMobileCashFlowTransactions()
         ];
 
         if (monthlyVariableBudget.value > 0) {
@@ -734,7 +976,8 @@ function reload(done?: () => void): void {
 
     const reloadPromises: Promise<unknown>[] = [
         overviewStore.loadTransactionOverview({ force: force }),
-        overviewStore.loadWeeklyExpenseStatistics({ force: force })
+        overviewStore.loadWeeklyExpenseStatistics({ force: force }),
+        loadMobileCashFlowTransactions()
     ];
 
     if (monthlyVariableBudget.value > 0) {
@@ -962,5 +1205,28 @@ init();
 .template-popover-menu .popover-inner {
     max-height: 400px;
     overflow-y: auto;
+}
+
+.shortfall-alert-box {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.whatif-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+}
+
+.whatif-result-box {
+    background-color: rgba(var(--f7-theme-color-rgb, 0, 122, 255), 0.06);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.dark .whatif-result-box {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 </style>

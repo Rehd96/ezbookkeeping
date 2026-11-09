@@ -55,7 +55,7 @@
                         <span class="text-caption text-medium-emphasis d-block">{{ tt('Pending Fixed Bills') }}</span>
                         <span class="text-h6 font-weight-bold text-warning">{{ displayPendingFixed }}</span>
                         <div class="text-caption text-disabled mt-1">
-                            {{ pendingBills.length }} {{ tt('bills due before month-end') }}
+                            {{ pendingBills.length }} {{ tt('bills due before next paycheck') }}
                         </div>
                     </v-card>
                 </v-col>
@@ -98,7 +98,7 @@
                         </span>
                         <div class="text-caption mt-1" :class="intesaShortfall > 0 ? 'text-error' : 'text-medium-emphasis'">
                             <span v-if="intesaShortfall > 0">
-                                {{ tt('Needs +') }}{{ formatCurrency(intesaShortfall + 3000) }} {{ tt('from TR before 20th') }}
+                                {{ tt('Needs +') }} {{ formatCurrency(intesaShortfall + 3000) }} {{ tt('from TR before') }} {{ intesaNextBillDateText }}
                             </span>
                             <span v-else>
                                 {{ formatCurrency(intesaPendingTotal) }} {{ tt('upcoming debits') }}
@@ -229,9 +229,9 @@
                                             :color="bill.daysUntil <= 1 ? 'error' : (bill.daysUntil <= 7 ? 'warning' : 'default')"
                                             class="font-weight-bold me-2"
                                         >
-                                            {{ getDaysUntilText(bill.daysUntil, bill.day) }}
+                                            {{ getDaysUntilText(bill.daysUntil) }}
                                         </v-chip>
-                                        <span class="text-body-2 font-weight-medium">{{ bill.day }} Nov</span>
+                                        <span class="text-body-2 font-weight-medium">{{ bill.day }} {{ bill.dueDate.toLocaleString('default', { month: 'short' }) }}</span>
                                     </div>
                                 </td>
                                 <td>
@@ -270,7 +270,7 @@
                     <div class="d-flex justify-center mt-2 text-caption text-medium-emphasis">
                         <span class="me-4 d-flex align-center">
                             <span class="legend-dot bg-primary me-1"></span>
-                            {{ tt('Projected Liquid Cash (All Accounts)') }}
+                            {{ tt('Monthly Budget (Paycheck)') }}
                         </span>
                         <span class="d-flex align-center">
                             <span class="legend-dot bg-error me-1"></span>
@@ -286,7 +286,7 @@
                             {{ tt('Simulate an Unplanned Expense Today') }}
                         </div>
                         <div class="text-caption text-medium-emphasis mb-4">
-                            {{ tt('Slide or tap an amount to see how it affects your remaining daily budget for the rest of November without doing any mental math.') }}
+                            {{ tt('Slide or tap an amount to see how it affects your remaining daily budget for the rest of the paycheck cycle without doing any mental math.') }}
                         </div>
 
                         <v-row align="center">
@@ -343,12 +343,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 
 import { useI18n } from '@/locales/helpers.ts';
 import { useUserStore } from '@/stores/user.ts';
 import { useAccountsStore } from '@/stores/account.ts';
-import { useOverviewStore } from '@/stores/overview.ts';
+import { useTransactionCategoriesStore } from '@/stores/transactionCategory.ts';
+import { useSettingsStore } from '@/stores/setting.ts';
+import services from '@/lib/services.ts';
+import type { CallbackDataParams } from 'echarts/types/dist/shared';
+import type { TransactionInfoResponse } from '@/models/transaction.ts';
+import {
+    type PendingBill,
+    type CycleRange,
+    STATIC_MONTHLY_BILLS,
+    isDatePayday,
+    computeCycle,
+    getPaidBillsInCycle,
+    getPendingBills,
+    getCycleSalary,
+    getCycleDailyVariableSpending
+} from '@/lib/cashflow.ts';
 
 import {
     mdiCashCheck,
@@ -360,7 +375,7 @@ import {
     mdiChartAreaspline
 } from '@mdi/js';
 
-defineProps<{
+const props = defineProps<{
     loading: boolean;
     disabled: boolean;
     isDarkMode?: boolean;
@@ -370,74 +385,65 @@ const { tt, formatAmountToLocalizedNumeralsWithCurrency } = useI18n();
 
 const userStore = useUserStore();
 const accountsStore = useAccountsStore();
-const overviewStore = useOverviewStore();
+const transactionCategoriesStore = useTransactionCategoriesStore();
+const settingsStore = useSettingsStore();
 
 const defaultCurrency = computed<string>(() => userStore.currentUserDefaultCurrency);
 const activeTab = ref<string>('pacing');
 const simulatedSpendAmount = ref<number>(0);
 
-interface BillDef {
-    day: number;
-    name: string;
-    amountCents: number;
-    account: string;
-    category: string;
-}
-
-const STATIC_MONTHLY_BILLS: BillDef[] = [
-    { day: 1,  name: 'Canone Conto Intesa',   amountCents: 700,    account: 'Intesa',           category: 'Finanza -> Costi di servizio' },
-    { day: 2,  name: 'Affitto (Rent)',         amountCents: 50000,  account: 'Budget Settimana', category: 'Alloggio -> Affitto e Mutuo' },
-    { day: 5,  name: 'Finanziamento PC',       amountCents: 3673,   account: 'Intesa',           category: 'Alloggio -> Elettronica' },
-    { day: 5,  name: 'IONOS Spazio Web',       amountCents: 1098,   account: 'Budget Settimana', category: 'Comunicazione -> Internet' },
-    { day: 8,  name: 'Fibra Casa (Internet)',  amountCents: 2979,   account: 'Intesa',           category: 'Comunicazione -> Internet' },
-    { day: 8,  name: 'Amazon Prime Ad-Free',   amountCents: 199,    account: 'Budget Settimana', category: 'Intrattenimento -> Sub' },
-    { day: 15, name: 'Tariffa Mobile (TIM)',   amountCents: 799,    account: 'Intesa',           category: 'Comunicazione -> Telefono' },
-    { day: 16, name: 'Amazon Prime',           amountCents: 499,    account: 'Budget Settimana', category: 'Intrattenimento -> Sub' },
-    { day: 16, name: 'PAC Trade Investiti',    amountCents: 5000,   account: 'Trade Republic',   category: 'Trasferimento -> PAC' },
-    { day: 20, name: 'Rata Auto',              amountCents: 30450,  account: 'Intesa',           category: 'Trasporti -> Spese auto' },
-    { day: 21, name: 'Utenze (Luce & Gas)',    amountCents: 11734,  account: 'Intesa',           category: 'Utenze -> Luce e Gas' },
-    { day: 30, name: 'IONOS VPS',              amountCents: 976,    account: 'Budget Settimana', category: 'Comunicazione -> VPS' }
-];
-
 const today = new Date();
 
-// Paycheck cycle calculation: first weekday after the 27th of the month
-function getPayday(year: number, month: number): Date {
-    const d = new Date(year, month, 28, 0, 0, 0, 0);
-    while (d.getDay() === 0 || d.getDay() === 6) { // 0 = Sunday, 6 = Saturday
-        d.setDate(d.getDate() + 1);
-    }
-    return d;
-}
+const cycleRange = computed<CycleRange>(() => computeCycle(today));
 
-const cycleRange = computed(() => {
-    const year = today.getFullYear();
-    const month = today.getMonth();
-
-    const thisMonthPayday = getPayday(year, month);
-    let start: Date;
-    let nextPayday: Date;
-
-    if (today.getTime() >= thisMonthPayday.getTime()) {
-        start = thisMonthPayday;
-        nextPayday = getPayday(year, month + 1);
-    } else {
-        nextPayday = thisMonthPayday;
-        start = getPayday(year, month - 1);
-    }
-
-    const end = new Date(nextPayday.getTime() - 24 * 60 * 60 * 1000);
-
-    const totalDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    const currentDay = Math.min(totalDays, Math.max(1, Math.round((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1));
-    const daysRemaining = Math.max(1, Math.round((nextPayday.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
-
-    return { start, end, nextPayday, totalDays, currentDay, daysRemaining };
+const priorCycleRange = computed<CycleRange>(() => {
+    const dayBeforeStart = new Date(cycleRange.value.start.getTime() - 24 * 60 * 60 * 1000);
+    return computeCycle(dayBeforeStart);
 });
 
 const totalDaysInCycle = computed(() => cycleRange.value.totalDays);
 const currentCycleDay = computed(() => cycleRange.value.currentDay);
 const daysLeftInCycle = computed(() => cycleRange.value.daysRemaining);
+
+// Live transaction loading & classification
+const cycleTransactions = ref<TransactionInfoResponse[]>([]);
+const priorCycleTransactions = ref<TransactionInfoResponse[]>([]);
+const isLoadingTransactions = ref<boolean>(false);
+
+async function loadTransactions() {
+    isLoadingTransactions.value = true;
+    try {
+        const priorStartUnix = Math.floor(priorCycleRange.value.start.getTime() / 1000);
+        const cycleStartUnix = Math.floor(cycleRange.value.start.getTime() / 1000);
+        const cycleEndUnix = Math.floor(cycleRange.value.nextPayday.getTime() / 1000);
+
+        const response = await services.getAllTransactions({
+            startTime: priorStartUnix,
+            endTime: cycleEndUnix,
+            withPictures: false
+        });
+
+        if (response.data && response.data.result) {
+            const all = response.data.result;
+            cycleTransactions.value = all.filter(t => t.time >= cycleStartUnix);
+            priorCycleTransactions.value = all.filter(t => t.time >= priorStartUnix && t.time < cycleStartUnix);
+        }
+    } catch (e) {
+        console.error('Failed to load cash flow transactions', e);
+    } finally {
+        isLoadingTransactions.value = false;
+    }
+}
+
+watch(() => props.loading, (newVal, oldVal) => {
+    if (oldVal && !newVal) {
+        loadTransactions();
+    }
+});
+
+onMounted(() => {
+    loadTransactions();
+});
 
 // Accounts extraction
 const allAccountsList = computed(() => accountsStore.allPlainAccounts || []);
@@ -462,29 +468,18 @@ const intesaAccount = computed(() =>
 
 const intesaBalance = computed<number>(() => intesaAccount.value?.balance || 0);
 
+// Paid bills detection in current cycle
+const paidBillsInCycle = computed(() => {
+    return getPaidBillsInCycle(
+        cycleTransactions.value,
+        settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage,
+        transactionCategoriesStore.allTransactionCategoriesMap
+    );
+});
+
 // Pending bills for current cycle
-const pendingBills = computed(() => {
-    const nextPayday = cycleRange.value.nextPayday;
-    const list: Array<typeof STATIC_MONTHLY_BILLS[0] & { daysUntil: number, dueDate: Date }> = [];
-    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-
-    for (const bill of STATIC_MONTHLY_BILLS) {
-        // Check bill in current month
-        const thisMonthDue = new Date(today.getFullYear(), today.getMonth(), bill.day, 0, 0, 0, 0);
-        if (thisMonthDue.getTime() >= todayMidnight.getTime() && thisMonthDue.getTime() < nextPayday.getTime()) {
-            const daysUntil = Math.round((thisMonthDue.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
-            list.push({ ...bill, daysUntil, dueDate: thisMonthDue });
-        }
-
-        // Check bill in next month if cycle spans into next month
-        const nextMonthDue = new Date(today.getFullYear(), today.getMonth() + 1, bill.day, 0, 0, 0, 0);
-        if (nextMonthDue.getTime() >= todayMidnight.getTime() && nextMonthDue.getTime() < nextPayday.getTime()) {
-            const daysUntil = Math.round((nextMonthDue.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
-            list.push({ ...bill, daysUntil, dueDate: nextMonthDue });
-        }
-    }
-
-    return list.sort((a, b) => a.daysUntil - b.daysUntil);
+const pendingBills = computed<PendingBill[]>(() => {
+    return getPendingBills(paidBillsInCycle.value, cycleRange.value.nextPayday, today);
 });
 
 const totalPendingFixed = computed<number>(() => {
@@ -492,7 +487,9 @@ const totalPendingFixed = computed<number>(() => {
 });
 
 // Financial Cash Flow Model: Paycheck Income - Fixed Bills
-const currentCycleSalary = computed<number>(() => 173600); // 1,736.00 EUR base salary
+const currentCycleSalary = computed<number>(() => {
+    return getCycleSalary(cycleTransactions.value, priorCycleTransactions.value, cycleRange.value.start);
+});
 
 const totalMonthlyFixedBills = computed<number>(() => {
     return STATIC_MONTHLY_BILLS.reduce((sum, b) => sum + b.amountCents, 0);
@@ -503,8 +500,21 @@ const monthlyVariableBudget = computed<number>(() => {
     return Math.max(0, currentCycleSalary.value - totalMonthlyFixedBills.value);
 });
 
-const spentAmountMTD = computed<number>(() => overviewStore.variableExpenseThisMonth?.expenseAmount || 0);
-const currentPivotCents = computed(() => spentAmountMTD.value);
+// Daily variable spending cumulative tracking
+const cycleDailyVariableSpending = computed(() => {
+    return getCycleDailyVariableSpending(
+        cycleTransactions.value,
+        cycleRange.value,
+        settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage,
+        transactionCategoriesStore.allTransactionCategoriesMap
+    );
+});
+
+const currentPivotCents = computed<number>(() => {
+    const curDay = currentCycleDay.value;
+    const { cumulativeSpend } = cycleDailyVariableSpending.value;
+    return cumulativeSpend[curDay] ?? 0;
+});
 
 // Dynamic Daily Allowance (Row 85: strictly from remaining paycheck variable budget)
 const remainingPaycheckVariableBudget = computed<number>(() => {
@@ -530,6 +540,12 @@ const intesaShortfall = computed<number>(() =>
     Math.max(0, intesaPendingTotal.value - intesaBalance.value)
 );
 
+const intesaNextBill = computed(() => intesaPendingBills.value[0]);
+const intesaNextBillDateText = computed(() => {
+    if (!intesaNextBill.value) return tt('next debit');
+    return `${intesaNextBill.value.day} ${intesaNextBill.value.dueDate.toLocaleString('default', { month: 'short' })}`;
+});
+
 // Formatting helpers
 function formatCurrency(cents: number): string {
     return formatAmountToLocalizedNumeralsWithCurrency(cents, defaultCurrency.value);
@@ -540,7 +556,7 @@ const displayPendingFixed = computed(() => formatCurrency(totalPendingFixed.valu
 const displayRemainingPaycheckBudget = computed(() => formatCurrency(remainingPaycheckVariableBudget.value));
 const displayIntesaBalance = computed(() => formatCurrency(intesaBalance.value));
 
-function getDaysUntilText(daysUntil: number, day: number): string {
+function getDaysUntilText(daysUntil: number): string {
     if (daysUntil === 0) return tt('Today');
     if (daysUntil === 1) return tt('Tomorrow');
     return `${tt('In')} ${daysUntil} ${tt('days')}`;
@@ -576,7 +592,26 @@ const cycleDailyBudget = computed(() => {
 const currentIdealeCents = computed(() => Math.round(currentCycleDay.value * cycleDailyBudget.value));
 const pacingDifference = computed(() => currentIdealeCents.value - currentPivotCents.value);
 
-const priorMonthPaceCents = computed(() => Math.round(currentIdealeCents.value * 0.94));
+// Prior month daily pace
+const priorCycleDailyVariableSpending = computed(() => {
+    return getCycleDailyVariableSpending(
+        priorCycleTransactions.value,
+        priorCycleRange.value,
+        settingsStore.appSettings.fixedTransactionCategoryFilterInHomePage,
+        transactionCategoriesStore.allTransactionCategoriesMap
+    );
+});
+
+const priorMonthPaceCents = computed(() => {
+    const { cumulativeSpend } = priorCycleDailyVariableSpending.value;
+    const curDay = Math.min(currentCycleDay.value, priorCycleRange.value.totalDays);
+    const priorAtCur = cumulativeSpend[curDay] ?? 0;
+    if (priorAtCur > 0) {
+        return priorAtCur;
+    }
+    return Math.round(currentIdealeCents.value * 0.94);
+});
+
 const velocityVsPriorMonth = computed(() => priorMonthPaceCents.value - currentPivotCents.value);
 
 const pacingChartOptions = computed(() => {
@@ -589,7 +624,11 @@ const pacingChartOptions = computed(() => {
 
     const startDate = cycleRange.value.start;
     const dailyRateEur = cycleDailyBudget.value / 100;
-    const currentPivotEur = currentPivotCents.value / 100;
+    const { cumulativeSpend } = cycleDailyVariableSpending.value;
+
+    const priorDays = priorCycleRange.value.totalDays;
+    const { cumulativeSpend: priorCum } = priorCycleDailyVariableSpending.value;
+    const hasPriorData = (priorCum[priorDays] ?? 0) > 0;
 
     for (let i = 1; i <= days; i++) {
         const d = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i - 1);
@@ -599,23 +638,29 @@ const pacingChartOptions = computed(() => {
         idealeData.push(idVal);
 
         if (i <= curDay) {
-            const progress = curDay > 0 ? (i / curDay) : 0;
-            const pVal = Math.round(currentPivotEur * Math.pow(progress, 0.96));
+            const pVal = Math.round((cumulativeSpend[i] || 0) / 100);
             pivotData.push(pVal);
         } else {
             pivotData.push(null);
         }
 
-        const prevProg = i / days;
-        const prevTotalEur = (monthlyVariableBudget.value / 100) * 0.95;
-        prevMonthData.push(Math.round(prevTotalEur * Math.pow(prevProg, 1.05)));
+        if (hasPriorData) {
+            const pDay = Math.min(i, priorDays);
+            prevMonthData.push(Math.round((priorCum[pDay] || 0) / 100));
+        } else {
+            const prevProg = i / days;
+            const prevTotalEur = (monthlyVariableBudget.value / 100) * 0.95;
+            prevMonthData.push(Math.round(prevTotalEur * Math.pow(prevProg, 1.05)));
+        }
     }
 
     return {
         tooltip: {
             trigger: 'axis',
-            formatter: (params: any[]) => {
-                let html = `<strong>${params[0].name} (Day ${params[0].dataIndex + 1})</strong><br/>`;
+            formatter: (params: CallbackDataParams[]) => {
+                const first = params[0];
+                if (!first) return '';
+                let html = `<strong>${first.name} (Day ${(first.dataIndex ?? 0) + 1})</strong><br/>`;
                 for (const p of params) {
                     if (p.value !== null && p.value !== undefined) {
                         html += `<span style="color:${p.color}">●</span> ${p.seriesName}: <strong>€${p.value}</strong><br/>`;
@@ -682,50 +727,57 @@ const pacingChartOptions = computed(() => {
     };
 });
 
-// 30-Day Forward Runway Chart Options
+// 30-Day Forward Runway Chart Options: strictly considering monthly budget and not overall portfolio
 const runwayChartOptions = computed(() => {
     const dates: string[] = [];
-    const liquidSeries: number[] = [];
+    const budgetSeries: number[] = [];
     const intesaSeries: number[] = [];
 
-    let currentLiquid = liquidCash.value / 100;
+    // Monthly Budget runway starts from the remaining paycheck cash (variable budget + pending fixed bills)
+    // rather than the overall portfolio savings!
+    let currentBudget = (remainingPaycheckVariableBudget.value + totalPendingFixed.value) / 100;
     let currentIntesa = intesaBalance.value / 100;
-    const dailyBurnRate = (baseDailyAllowance.value / 100) || 16.0;
+    const dailyBurnRate = (dynamicDailyAllowance.value > 0 ? dynamicDailyAllowance.value : cycleDailyBudget.value) / 100;
 
     for (let i = 0; i < 30; i++) {
-        const targetDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+        const targetDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i, 0, 0, 0, 0);
         const dayOfMonth = targetDate.getDate();
         const dateStr = `${dayOfMonth} ${targetDate.toLocaleString('default', { month: 'short' })}`;
         dates.push(dateStr);
 
-        // Subtract bills due on this day
+        // Check if salary arrives on targetDate (payday: first weekday after 27th)
+        if (i > 0 && isDatePayday(targetDate)) {
+            currentBudget += (currentCycleSalary.value / 100);
+            currentIntesa += 500; // Salary share allocated to Intesa buffer
+        }
+
+        // Subtract bills due on this day (for today onwards)
         const billsOnDay = STATIC_MONTHLY_BILLS.filter(b => b.day === dayOfMonth);
         for (const bill of billsOnDay) {
-            const billEuros = bill.amountCents / 100;
-            currentLiquid -= billEuros;
-            if (bill.account === 'Intesa') {
-                currentIntesa -= billEuros;
+            const isBillApplicable = i > 0 || pendingBills.value.some(p => p.name === bill.name);
+            if (isBillApplicable) {
+                const billEuros = bill.amountCents / 100;
+                currentBudget -= billEuros;
+                if (bill.account === 'Intesa') {
+                    currentIntesa -= billEuros;
+                }
             }
         }
 
-        // Salary arrival around the 11th
-        if (dayOfMonth === 11) {
-            currentLiquid += 1704;
-            currentIntesa += 500;
-        }
-
         // Variable daily spend
-        currentLiquid -= dailyBurnRate;
+        currentBudget -= dailyBurnRate;
 
-        liquidSeries.push(Math.round(currentLiquid));
+        budgetSeries.push(Math.round(currentBudget));
         intesaSeries.push(Math.round(currentIntesa));
     }
 
     return {
         tooltip: {
             trigger: 'axis',
-            formatter: (params: any[]) => {
-                let html = `<strong>${params[0].name}</strong><br/>`;
+            formatter: (params: CallbackDataParams[]) => {
+                const first = params[0];
+                if (!first) return '';
+                let html = `<strong>${first.name}</strong><br/>`;
                 for (const p of params) {
                     html += `<span style="color:${p.color}">●</span> ${p.seriesName}: <strong>€${p.value}</strong><br/>`;
                 }
@@ -751,17 +803,17 @@ const runwayChartOptions = computed(() => {
         },
         series: [
             {
-                name: tt('Liquid Balance'),
+                name: tt('Monthly Budget (Paycheck)'),
                 type: 'line',
                 smooth: true,
-                data: liquidSeries,
+                data: budgetSeries,
                 color: '#1976D2',
                 areaStyle: {
-                    color: 'rgba(255, 152, 0, 0.1)'
+                    color: 'rgba(25, 118, 210, 0.1)'
                 }
             },
             {
-                name: tt('Intesa Account'),
+                name: tt('Intesa Account Buffer'),
                 type: 'line',
                 smooth: true,
                 data: intesaSeries,
